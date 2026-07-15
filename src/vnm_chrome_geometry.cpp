@@ -60,12 +60,44 @@ bool rect_has_snapped_physical_edges(
         edge_is_snapped(logical_rect.bottom());
 }
 
+qreal resize_inward_extent(
+    qreal frame_extent,
+    qreal target_extent)
+{
+    const qreal frame = std::isfinite(frame_extent)
+        ? std::max<qreal>(0.0, frame_extent)
+        : 0.0;
+    const qreal target = std::isfinite(target_extent)
+        ? std::max<qreal>(0.0, target_extent)
+        : 0.0;
+    return std::max<qreal>(0.0, target - frame) * 3.0 / 11.0;
+}
+
+qreal resize_outward_extent(
+    qreal frame_extent,
+    qreal target_extent)
+{
+    const qreal frame = std::isfinite(frame_extent)
+        ? std::max<qreal>(0.0, frame_extent)
+        : 0.0;
+    const qreal target = std::isfinite(target_extent)
+        ? std::max<qreal>(0.0, target_extent)
+        : 0.0;
+    const qreal shortfall = std::max<qreal>(0.0, target - frame);
+    return shortfall - resize_inward_extent(frame, target);
+}
+
 } // namespace vnm_qml_chrome
 
 vnm_qml_chrome::Chrome_geometry::Chrome_geometry(QObject* parent)
 :
     QObject(parent)
 {
+}
+
+qreal vnm_qml_chrome::Chrome_geometry::default_resize_target_extent() const
+{
+    return k_default_resize_target_extent;
 }
 
 qreal vnm_qml_chrome::Chrome_geometry::normalized_device_pixel_ratio(
@@ -95,4 +127,18 @@ bool vnm_qml_chrome::Chrome_geometry::rect_has_snapped_physical_edges(
     return vnm_qml_chrome::rect_has_snapped_physical_edges(
         logical_rect,
         device_pixel_ratio);
+}
+
+qreal vnm_qml_chrome::Chrome_geometry::resize_inward_extent(
+    qreal frame_extent,
+    qreal target_extent) const
+{
+    return vnm_qml_chrome::resize_inward_extent(frame_extent, target_extent);
+}
+
+qreal vnm_qml_chrome::Chrome_geometry::resize_outward_extent(
+    qreal frame_extent,
+    qreal target_extent) const
+{
+    return vnm_qml_chrome::resize_outward_extent(frame_extent, target_extent);
 }

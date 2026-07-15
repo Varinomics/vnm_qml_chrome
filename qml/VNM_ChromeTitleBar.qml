@@ -12,7 +12,11 @@ Rectangle {
     property bool active: true
     property bool maximized: false
     property bool resize_enabled: true
-    property real resize_border_width: 6
+    property real resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
+    property alias resize_border_width: titlebar.resize_target_extent
+    property real top_frame_extent: 0
+    property real left_frame_extent: 0
+    property real right_frame_extent: 0
     property real device_pixel_ratio: Screen.devicePixelRatio
     property bool animated_mark_visible: true
     property string activity_marker_text: ""
@@ -34,10 +38,39 @@ Rectangle {
     property bool minimize_button_visible: true
     property bool maximize_button_visible: true
     property bool close_button_visible: true
-    readonly property real snapped_resize_border_width:
-        VNM_chrome_geometry.snapped_logical_edge(
-            resize_border_width,
-            device_pixel_ratio)
+    readonly property real top_frame: non_negative(top_frame_extent)
+    readonly property real left_frame: non_negative(left_frame_extent)
+    readonly property real right_frame: non_negative(right_frame_extent)
+    readonly property real top_resize_inward_extent:
+        VNM_chrome_geometry.resize_inward_extent(top_frame, resize_target_extent)
+    readonly property real top_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(top_frame, resize_target_extent)
+    readonly property real left_resize_inward_extent:
+        VNM_chrome_geometry.resize_inward_extent(left_frame, resize_target_extent)
+    readonly property real left_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(left_frame, resize_target_extent)
+    readonly property real right_resize_inward_extent:
+        VNM_chrome_geometry.resize_inward_extent(right_frame, resize_target_extent)
+    readonly property real right_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(right_frame, resize_target_extent)
+    readonly property real snapped_top_resize_near_extent:
+        snapped_extent(top_frame + top_resize_inward_extent)
+    readonly property real snapped_top_resize_outward_extent:
+        snapped_extent(top_resize_outward_extent)
+    readonly property real snapped_top_resize_hit_extent:
+        snapped_top_resize_near_extent + snapped_top_resize_outward_extent
+    readonly property real snapped_left_resize_near_extent:
+        snapped_extent(left_frame + left_resize_inward_extent)
+    readonly property real snapped_left_resize_outward_extent:
+        snapped_extent(left_resize_outward_extent)
+    readonly property real snapped_left_resize_hit_extent:
+        snapped_left_resize_near_extent + snapped_left_resize_outward_extent
+    readonly property real snapped_right_resize_near_extent:
+        snapped_extent(right_frame + right_resize_inward_extent)
+    readonly property real snapped_right_resize_outward_extent:
+        snapped_extent(right_resize_outward_extent)
+    readonly property real snapped_right_resize_hit_extent:
+        snapped_right_resize_near_extent + snapped_right_resize_outward_extent
     readonly property real content_border_width:
         1 / VNM_chrome_geometry.normalized_device_pixel_ratio(device_pixel_ratio)
     readonly property real window_frame_top_width:
@@ -55,6 +88,14 @@ Rectangle {
     signal minimize_requested()
     signal maximize_toggle_requested()
     signal close_requested()
+
+    function non_negative(value) {
+        return isFinite(value) ? Math.max(0, value) : 0
+    }
+
+    function snapped_extent(value) {
+        return VNM_chrome_geometry.snapped_logical_edge(value, device_pixel_ratio)
+    }
 
     function maybe_start_system_move(move_area, mouse) {
         if (move_area.system_move_started || !(mouse.buttons & Qt.LeftButton)) {
@@ -131,7 +172,7 @@ Rectangle {
         id: content_layout
 
         anchors.fill: parent
-        anchors.leftMargin: titlebar.snapped_resize_border_width
+        anchors.leftMargin: titlebar.snapped_left_resize_near_extent
         spacing: 0
         z: 2
 
@@ -422,11 +463,11 @@ Rectangle {
     VNM_ChromeResizeArea {
         objectName: "top_resize_area"
         anchors.left: parent.left
-        anchors.leftMargin: titlebar.snapped_resize_border_width
-        anchors.top: parent.top
+        anchors.leftMargin: titlebar.snapped_left_resize_near_extent
         anchors.right: parent.right
         anchors.rightMargin: titlebar_buttons.width + custom_buttons_row.width
-        height: titlebar.snapped_resize_border_width
+        y: -titlebar.snapped_top_resize_outward_extent
+        height: titlebar.snapped_top_resize_hit_extent
         enabled: titlebar.resize_enabled
         edges: Qt.TopEdge
         cursorShape: Qt.SizeVerCursor
@@ -437,10 +478,10 @@ Rectangle {
 
     VNM_ChromeResizeArea {
         objectName: "top_left_resize_area"
-        anchors.left: parent.left
-        anchors.top: parent.top
-        width: titlebar.snapped_resize_border_width
-        height: titlebar.snapped_resize_border_width
+        x: -titlebar.snapped_left_resize_outward_extent
+        y: -titlebar.snapped_top_resize_outward_extent
+        width: titlebar.snapped_left_resize_hit_extent
+        height: titlebar.snapped_top_resize_hit_extent
         enabled: titlebar.resize_enabled
         edges: Qt.LeftEdge | Qt.TopEdge
         cursorShape: Qt.SizeFDiagCursor
@@ -451,10 +492,10 @@ Rectangle {
 
     VNM_ChromeResizeArea {
         objectName: "top_right_resize_area"
-        anchors.right: parent.right
-        anchors.top: parent.top
-        width: titlebar.snapped_resize_border_width
-        height: titlebar.snapped_resize_border_width
+        x: titlebar.width - titlebar.snapped_right_resize_near_extent
+        y: -titlebar.snapped_top_resize_outward_extent
+        width: titlebar.snapped_right_resize_hit_extent
+        height: titlebar.snapped_top_resize_hit_extent
         enabled: titlebar.resize_enabled
         edges: Qt.RightEdge | Qt.TopEdge
         cursorShape: Qt.SizeBDiagCursor

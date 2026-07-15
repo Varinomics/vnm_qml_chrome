@@ -51,7 +51,6 @@ Window {
         frame_gap: root.frame_visible ? 3 : 0
         frame_inner_edge: root.frame_visible ? root.frame_width : 0
         frame_inner_edge_color: chrome_theme.window_frame_border
-        edge_resize_extent: 6
 
         onMove_requested: VNM_system_window.start_system_move(root)
         onResize_requested: (edges) =>
@@ -64,5 +63,15 @@ Window {
             anchors.fill: parent
             color: "#263238"
         }
+    }
+
+    VNM_NativeWindowFrame {
+        window: root
+        frame_visible: false
+        resize_enabled: chrome_shell.resize_enabled
+        resize_outward_margins.left: chrome_shell.left_resize_outward_extent
+        resize_outward_margins.top: chrome_shell.top_resize_outward_extent
+        resize_outward_margins.right: chrome_shell.right_resize_outward_extent
+        resize_outward_margins.bottom: chrome_shell.bottom_resize_outward_extent
     }
 }

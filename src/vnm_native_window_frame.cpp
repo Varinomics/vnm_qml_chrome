@@ -3,6 +3,10 @@
 #include <QScreen>
 
 #ifdef Q_OS_WIN
+#include <QMouseEvent>
+#include <QQuickWindow>
+#include <QRegion>
+#include <QSurfaceFormat>
 #include <windows.h>
 #endif
 
@@ -15,6 +19,11 @@
 
 namespace {
 
+qreal non_negative_extent(qreal extent)
+{
+    return std::isfinite(extent) ? std::max<qreal>(0.0, extent) : 0.0;
+}
+
 #ifdef Q_OS_WIN
 
 constexpr wchar_t k_native_frame_window_class[] = L"VNM_NativeWindowFrameEdge";
@@ -22,6 +31,112 @@ constexpr int k_top_edge                        = 0;
 constexpr int k_bottom_edge                     = 1;
 constexpr int k_left_edge                       = 2;
 constexpr int k_right_edge                      = 3;
+
+Qt::CursorShape resize_cursor(Qt::Edges edges)
+{
+    if (edges == (Qt::LeftEdge | Qt::TopEdge) ||
+        edges == (Qt::RightEdge | Qt::BottomEdge))
+    {
+        return Qt::SizeFDiagCursor;
+    }
+    if (edges == (Qt::RightEdge | Qt::TopEdge) ||
+        edges == (Qt::LeftEdge | Qt::BottomEdge))
+    {
+        return Qt::SizeBDiagCursor;
+    }
+    if (edges.testFlag(Qt::LeftEdge) || edges.testFlag(Qt::RightEdge)) {
+        return Qt::SizeHorCursor;
+    }
+    return Qt::SizeVerCursor;
+}
+
+class Resize_border_window final : public QQuickWindow
+{
+public:
+    explicit Resize_border_window(QWindow* owner)
+    :
+        m_owner(owner)
+    {
+        QSurfaceFormat alpha_format = format();
+        alpha_format.setAlphaBufferSize(8);
+        setFormat(alpha_format);
+        setColor(Qt::transparent);
+        setFlags(
+            Qt::Tool |
+            Qt::FramelessWindowHint |
+            Qt::WindowDoesNotAcceptFocus |
+            Qt::NoDropShadowWindowHint);
+        setObjectName(QStringLiteral("vnm_native_resize_border"));
+        setTransientParent(owner);
+    }
+
+    bool update_geometry(const QMarginsF& margins)
+    {
+        if (!m_owner) {
+            return false;
+        }
+
+        const int left   = qRound(margins.left());
+        const int top    = qRound(margins.top());
+        const int right  = qRound(margins.right());
+        const int bottom = qRound(margins.bottom());
+        if (left + top + right + bottom == 0) {
+            return false;
+        }
+
+        const QRect owner_geometry = m_owner->geometry();
+        setGeometry(owner_geometry.adjusted(-left, -top, right, bottom));
+
+        m_inner_rect = QRect(left, top, owner_geometry.width(), owner_geometry.height());
+        const QRegion outside_ring = QRegion(QRect(QPoint(0, 0), size()))
+            .subtracted(QRegion(m_inner_rect));
+        if (mask() != outside_ring) {
+            setMask(outside_ring);
+        }
+        return !outside_ring.isEmpty();
+    }
+
+protected:
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        const Qt::Edges edges = resize_edges(event->position());
+        if (edges != Qt::Edges{}) {
+            setCursor(resize_cursor(edges));
+        }
+        event->accept();
+    }
+
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        const Qt::Edges edges = resize_edges(event->position());
+        if (event->button() == Qt::LeftButton && m_owner && edges != Qt::Edges{}) {
+            m_owner->startSystemResize(edges);
+        }
+        event->accept();
+    }
+
+private:
+    Qt::Edges resize_edges(const QPointF& position) const
+    {
+        Qt::Edges edges;
+        if (position.x() < m_inner_rect.left()) {
+            edges |= Qt::LeftEdge;
+        }
+        if (position.x() >= m_inner_rect.left() + m_inner_rect.width()) {
+            edges |= Qt::RightEdge;
+        }
+        if (position.y() < m_inner_rect.top()) {
+            edges |= Qt::TopEdge;
+        }
+        if (position.y() >= m_inner_rect.top() + m_inner_rect.height()) {
+            edges |= Qt::BottomEdge;
+        }
+        return edges;
+    }
+
+    QPointer<QWindow> m_owner;
+    QRect m_inner_rect;
+};
 
 HWND as_hwnd(void* handle)
 {
@@ -101,13 +216,15 @@ ATOM ensure_native_frame_window_class()
 } // namespace
 
 VNM_NativeWindowFrame::VNM_NativeWindowFrame(QObject* parent)
-    : QObject(parent)
+:
+    QObject(parent)
 {
 }
 
 VNM_NativeWindowFrame::~VNM_NativeWindowFrame()
 {
 #ifdef Q_OS_WIN
+    destroy_resize_border_window();
     destroy_edge_windows();
 #endif
     disconnect_window();
@@ -125,12 +242,23 @@ void VNM_NativeWindowFrame::set_window(QWindow* window)
     }
 
 #ifdef Q_OS_WIN
+    destroy_resize_border_window();
     destroy_edge_windows();
 #endif
     disconnect_window();
 
     m_window = window;
     if (m_window) {
+        m_window_connections.push_back(QObject::connect(
+            m_window,
+            &QWindow::xChanged,
+            this,
+            [this](int) { update_native_frame(); }));
+        m_window_connections.push_back(QObject::connect(
+            m_window,
+            &QWindow::yChanged,
+            this,
+            [this](int) { update_native_frame(); }));
         m_window_connections.push_back(QObject::connect(
             m_window,
             &QWindow::widthChanged,
@@ -162,6 +290,7 @@ void VNM_NativeWindowFrame::set_window(QWindow* window)
             this,
             [this] {
 #ifdef Q_OS_WIN
+                destroy_resize_border_window();
                 for (void*& edge_window : m_edge_windows) {
                     edge_window = nullptr;
                 }
@@ -229,6 +358,44 @@ void VNM_NativeWindowFrame::set_frame_color(const QColor& frame_color)
     update_native_frame();
 }
 
+bool VNM_NativeWindowFrame::resize_enabled() const
+{
+    return m_resize_enabled;
+}
+
+void VNM_NativeWindowFrame::set_resize_enabled(bool resize_enabled)
+{
+    if (m_resize_enabled == resize_enabled) {
+        return;
+    }
+
+    m_resize_enabled = resize_enabled;
+    emit resize_enabled_changed();
+    update_native_frame();
+}
+
+QMarginsF VNM_NativeWindowFrame::resize_outward_margins() const
+{
+    return m_resize_outward_margins;
+}
+
+void VNM_NativeWindowFrame::set_resize_outward_margins(
+    const QMarginsF& resize_outward_margins)
+{
+    const QMarginsF normalized_margins(
+        non_negative_extent(resize_outward_margins.left()),
+        non_negative_extent(resize_outward_margins.top()),
+        non_negative_extent(resize_outward_margins.right()),
+        non_negative_extent(resize_outward_margins.bottom()));
+    if (m_resize_outward_margins == normalized_margins) {
+        return;
+    }
+
+    m_resize_outward_margins = normalized_margins;
+    emit resize_outward_margins_changed();
+    update_native_frame();
+}
+
 bool VNM_NativeWindowFrame::active() const
 {
     return m_active;
@@ -258,10 +425,12 @@ void VNM_NativeWindowFrame::update_native_frame()
     if (!should_use_native_frame()) {
         clear_native_frame();
         set_active(false);
-        return;
+    }
+    else {
+        set_active(apply_native_frame());
     }
 
-    set_active(apply_native_frame());
+    update_resize_border_window();
 #else
     set_active(false);
 #endif
@@ -277,6 +446,15 @@ bool VNM_NativeWindowFrame::should_use_native_frame() const
         && m_frame_width > 0.0
         && m_frame_color.isValid()
         && m_frame_color.alpha() == 255;
+}
+
+bool VNM_NativeWindowFrame::should_use_native_resize_border() const
+{
+    return m_window
+        && m_window->isVisible()
+        && m_window->visibility() == QWindow::Windowed
+        && m_resize_enabled
+        && !m_resize_outward_margins.isNull();
 }
 
 void* VNM_NativeWindowFrame::window_handle() const
@@ -467,6 +645,34 @@ int VNM_NativeWindowFrame::frame_width_px(void* parent_window_handle) const
     const qreal scale       = dpi > 0 ? static_cast<qreal>(dpi) / 96.0 : 1.0;
     const int frame_width   = static_cast<int>(std::lround(m_frame_width * scale));
     return std::max(1, frame_width);
+}
+
+void VNM_NativeWindowFrame::update_resize_border_window()
+{
+    if (!should_use_native_resize_border()) {
+        if (m_resize_border_window) {
+            m_resize_border_window->hide();
+        }
+        return;
+    }
+
+    if (!m_resize_border_window) {
+        m_resize_border_window = new Resize_border_window(m_window);
+    }
+
+    auto* resize_border = static_cast<Resize_border_window*>(m_resize_border_window);
+    if (!resize_border->update_geometry(m_resize_outward_margins)) {
+        resize_border->hide();
+        return;
+    }
+
+    resize_border->show();
+}
+
+void VNM_NativeWindowFrame::destroy_resize_border_window()
+{
+    delete m_resize_border_window;
+    m_resize_border_window = nullptr;
 }
 
 #endif

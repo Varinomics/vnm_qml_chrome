@@ -14,7 +14,8 @@ Item {
     property real frame_gap: 3
     property real frame_inner_edge: 1
     property color frame_inner_edge_color: "#2a313c"
-    property real edge_resize_extent: 4
+    property real resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
+    property alias edge_resize_extent: shell.resize_target_extent
     property real device_pixel_ratio: Screen.devicePixelRatio
     property real render_target_physical_width: 0
     property real render_target_physical_height: 0
@@ -46,7 +47,6 @@ Item {
     readonly property real outer_edge: non_negative(frame_outer_edge)
     readonly property real inner_edge: non_negative(frame_inner_edge)
     readonly property real side_gap: non_negative(frame_gap)
-    readonly property real resize_extent: non_negative(edge_resize_extent)
     readonly property real titlebar_extent: non_negative(titlebar_height)
     readonly property size detected_render_target_physical_size:
         VNM_system_window.native_window_physical_size(
@@ -113,6 +113,28 @@ Item {
         effective_render_target_physical_height > 0
             ? Math.max(0, outer_bottom_near_edge - side_gap_width)
             : snapped_edge(height - outer_edge - side_gap)
+    readonly property real left_resize_frame_extent: content_left
+    readonly property real right_resize_frame_extent:
+        Math.max(0, outer_right_far_edge - content_right)
+    readonly property real top_resize_frame_extent: outer_top_far_edge
+    readonly property real bottom_resize_frame_extent:
+        Math.max(0, outer_bottom_far_edge - content_bottom)
+    readonly property real left_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(
+            left_resize_frame_extent,
+            resize_target_extent)
+    readonly property real right_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(
+            right_resize_frame_extent,
+            resize_target_extent)
+    readonly property real top_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(
+            top_resize_frame_extent,
+            resize_target_extent)
+    readonly property real bottom_resize_outward_extent:
+        VNM_chrome_geometry.resize_outward_extent(
+            bottom_resize_frame_extent,
+            resize_target_extent)
 
     signal move_requested()
     signal resize_requested(int edges)
@@ -240,7 +262,10 @@ Item {
         height: shell.titlebar_extent
         theme: titlebar_theme
         resize_enabled: shell.resize_enabled
-        resize_border_width: shell.resize_extent
+        resize_target_extent: shell.resize_target_extent
+        top_frame_extent: shell.top_resize_frame_extent
+        left_frame_extent: shell.left_resize_frame_extent
+        right_frame_extent: shell.right_resize_frame_extent
         device_pixel_ratio: shell.device_pixel_ratio
         window_frame_top_visible: shell.outer_edge > 0
         window_frame_width: shell.outer_edge
@@ -312,7 +337,9 @@ Item {
 
         anchors.fill: parent
         resize_enabled: shell.resize_enabled
-        resize_border_width: shell.resize_extent
+        resize_target_extent: shell.resize_target_extent
+        left_frame_extent: shell.left_resize_frame_extent
+        right_frame_extent: shell.right_resize_frame_extent
         onResize_requested: (edges) => shell.resize_requested(edges)
     }
 
@@ -322,9 +349,12 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: shell.resize_extent
+        height: implicitHeight
         resize_enabled: shell.resize_enabled
-        resize_border_width: shell.resize_extent
+        resize_target_extent: shell.resize_target_extent
+        left_frame_extent: shell.left_resize_frame_extent
+        right_frame_extent: shell.right_resize_frame_extent
+        bottom_frame_extent: shell.bottom_resize_frame_extent
         onResize_requested: (edges) => shell.resize_requested(edges)
     }
 

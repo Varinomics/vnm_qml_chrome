@@ -194,6 +194,29 @@ private slots:
             "Custom-frame terminal content must snap off the half physical pixel.");
     }
 
+    void geometry_helpers_distribute_resize_target_around_frame()
+    {
+        using vnm_qml_chrome::resize_inward_extent;
+        using vnm_qml_chrome::resize_outward_extent;
+
+        struct Resize_case {
+            qreal frame_extent;
+            qreal inward_extent;
+            qreal outward_extent;
+        };
+        const Resize_case cases[] = {
+            { 0.0,  3.0,         8.0        },
+            { 5.0, 18.0 / 11.0, 48.0 / 11.0 },
+            {10.0,  3.0 / 11.0,  8.0 / 11.0 },
+            {12.0,  0.0,         0.0        },
+        };
+
+        for (const Resize_case& c : cases) {
+            QVERIFY(nearly_equal(resize_inward_extent(c.frame_extent), c.inward_extent));
+            QVERIFY(nearly_equal(resize_outward_extent(c.frame_extent), c.outward_extent));
+        }
+    }
+
     void geometry_singleton_exposes_snapping_contract()
     {
         QQmlEngine engine;
@@ -220,6 +243,18 @@ Item {
 
     function rect_snapped() {
         return VNM_chrome_geometry.rect_has_snapped_physical_edges(snapped_rect(), 1.25)
+    }
+
+    function resize_inward_extent() {
+        return VNM_chrome_geometry.resize_inward_extent(5, 11)
+    }
+
+    function resize_outward_extent() {
+        return VNM_chrome_geometry.resize_outward_extent(5, 11)
+    }
+
+    function default_resize_target_extent() {
+        return VNM_chrome_geometry.default_resize_target_extent
     }
 }
 )";
@@ -257,6 +292,27 @@ Item {
             "rect_snapped",
             Q_RETURN_ARG(QVariant, rect_snapped)));
         QVERIFY(rect_snapped.toBool());
+
+        QVariant default_resize_target;
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "default_resize_target_extent",
+            Q_RETURN_ARG(QVariant, default_resize_target)));
+        QCOMPARE(default_resize_target.toReal(), 11.0);
+
+        QVariant resize_inward;
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "resize_inward_extent",
+            Q_RETURN_ARG(QVariant, resize_inward)));
+        QVERIFY(nearly_equal(resize_inward.toReal(), 18.0 / 11.0));
+
+        QVariant resize_outward;
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "resize_outward_extent",
+            Q_RETURN_ARG(QVariant, resize_outward)));
+        QVERIFY(nearly_equal(resize_outward.toReal(), 48.0 / 11.0));
     }
 
     void system_window_singleton_exposes_qwindow_wrapper_contract()
@@ -348,6 +404,58 @@ Window {
         QCOMPARE(frame.frame_color(), QColor(18, 52, 86, 120));
         QCOMPARE(frame.active(), false);
     }
+
+    void native_frame_normalizes_resize_outward_margins()
+    {
+        VNM_NativeWindowFrame frame;
+
+        frame.set_resize_outward_margins(QMarginsF(4.0, -2.0, 8.0, 3.0));
+        QCOMPARE(frame.resize_outward_margins(), QMarginsF(4.0, 0.0, 8.0, 3.0));
+
+        frame.set_resize_outward_margins(QMarginsF(
+            std::numeric_limits<qreal>::infinity(),
+            std::numeric_limits<qreal>::quiet_NaN(),
+            1.0,
+            2.0));
+        QCOMPARE(frame.resize_outward_margins(), QMarginsF(0.0, 0.0, 1.0, 2.0));
+    }
+
+#ifdef Q_OS_WIN
+    void native_resize_border_follows_window_geometry()
+    {
+        QQuickWindow owner;
+        owner.setFlags(Qt::Window | Qt::FramelessWindowHint);
+        owner.setGeometry(80, 60, 320, 180);
+        owner.show();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        VNM_NativeWindowFrame frame;
+        frame.set_frame_visible(false);
+        frame.set_window(&owner);
+        frame.set_resize_outward_margins(QMarginsF(4.0, 5.0, 6.0, 7.0));
+        frame.set_resize_enabled(true);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QWindow* resize_border = nullptr;
+        for (QWindow* window : QGuiApplication::topLevelWindows()) {
+            if (window->objectName() == QStringLiteral("vnm_native_resize_border") &&
+                window->transientParent() == &owner)
+            {
+                resize_border = window;
+                break;
+            }
+        }
+
+        QVERIFY(resize_border != nullptr);
+        QVERIFY(resize_border->isVisible());
+        QCOMPARE(resize_border->geometry(), owner.geometry().adjusted(-4, -5, 6, 7));
+        QVERIFY(!resize_border->mask().isEmpty());
+
+        frame.set_resize_enabled(false);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QVERIFY(!resize_border->isVisible());
+    }
+#endif
 
     void solid_window_example_loads_with_registered_runtime()
     {
@@ -576,13 +684,18 @@ Item {
         QObject* side_layer = find_descendant(root.get(), QStringLiteral("side_layer"));
         QVERIFY(side_layer != nullptr);
         QVERIFY(has_property(side_layer, "resize_enabled"));
+        QVERIFY(has_property(side_layer, "resize_target_extent"));
         QVERIFY(has_property(side_layer, "resize_border_width"));
+        QVERIFY(has_property(side_layer, "left_frame_extent"));
+        QVERIFY(has_property(side_layer, "right_frame_extent"));
         QVERIFY(has_signal(side_layer, "resize_requested(int)"));
 
         QObject* bottom_layer = find_descendant(root.get(), QStringLiteral("bottom_layer"));
         QVERIFY(bottom_layer != nullptr);
         QVERIFY(has_property(bottom_layer, "resize_enabled"));
+        QVERIFY(has_property(bottom_layer, "resize_target_extent"));
         QVERIFY(has_property(bottom_layer, "resize_border_width"));
+        QVERIFY(has_property(bottom_layer, "bottom_frame_extent"));
         QVERIFY(has_signal(bottom_layer, "resize_requested(int)"));
 
         QObject* native_frame = find_descendant(root.get(), QStringLiteral("native_window_frame"));
@@ -591,6 +704,8 @@ Item {
         QVERIFY(has_property(native_frame, "frame_visible"));
         QVERIFY(has_property(native_frame, "frame_width"));
         QVERIFY(has_property(native_frame, "frame_color"));
+        QVERIFY(has_property(native_frame, "resize_enabled"));
+        QVERIFY(has_property(native_frame, "resize_outward_margins"));
         QVERIFY(has_property(native_frame, "active"));
         QCOMPARE(native_frame->property("frame_visible").toBool(), true);
         QCOMPARE(native_frame->property("frame_width").toReal(), 2.0);
@@ -624,7 +739,11 @@ Item {
             "active",
             "maximized",
             "resize_enabled",
+            "resize_target_extent",
             "resize_border_width",
+            "top_frame_extent",
+            "left_frame_extent",
+            "right_frame_extent",
             "device_pixel_ratio",
             "animated_mark_visible",
             "activity_marker_text",
@@ -670,7 +789,7 @@ Item {
         frame_gap: 5
         frame_inner_edge: 3
         frame_inner_edge_color: "#405060"
-        edge_resize_extent: 11
+        resize_target_extent: 11
     }
 }
 )";
@@ -691,6 +810,7 @@ Item {
             "frame_gap",
             "frame_inner_edge",
             "frame_inner_edge_color",
+            "resize_target_extent",
             "edge_resize_extent",
             "device_pixel_ratio",
             "render_target_physical_width",
@@ -763,7 +883,7 @@ Item {
         frame_gap: 5
         frame_inner_edge: 3
         frame_inner_edge_color: "#405060"
-        edge_resize_extent: 11
+        resize_target_extent: 11
     }
 }
 )";
@@ -846,11 +966,23 @@ Item {
             QRectF(10.0, 35.0, 180.0, 75.0)));
 
         auto* left_resize_area = find_item(root.get(), QStringLiteral("left_resize_area"));
+        auto* right_resize_area = find_item(root.get(), QStringLiteral("right_resize_area"));
+        auto* bottom_resize_area = find_item(root.get(), QStringLiteral("bottom_resize_area"));
         auto* top_left_resize_area = find_item(root.get(), QStringLiteral("top_left_resize_area"));
         QVERIFY(left_resize_area     != nullptr);
+        QVERIFY(right_resize_area    != nullptr);
+        QVERIFY(bottom_resize_area   != nullptr);
         QVERIFY(top_left_resize_area != nullptr);
+        QVERIFY(nearly_equal(left_resize_area->x(), -8.0 / 11.0));
         QVERIFY(nearly_equal(left_resize_area->width(), 11.0));
+        QVERIFY(nearly_equal(right_resize_area->x(), 200.0 - 10.0 - 3.0 / 11.0));
+        QVERIFY(nearly_equal(right_resize_area->width(), 11.0));
+        QVERIFY(nearly_equal(bottom_resize_area->y(), 8.0 / 11.0));
+        QVERIFY(nearly_equal(bottom_resize_area->height(), 11.0));
         QVERIFY(nearly_equal(top_left_resize_area->width(), 11.0));
+        QVERIFY(nearly_equal(
+            shell->property("left_resize_outward_extent").toReal(),
+            8.0 / 11.0));
     }
 
     void frame_shell_preserves_dpr_125_scalar_geometry_examples()
@@ -874,7 +1006,7 @@ Item {
         frame_gap: 4
         frame_outer_edge: 0.8
         frame_inner_edge: 0.8
-        edge_resize_extent: 4.8
+        resize_target_extent: 4.8
     }
 }
 )";
@@ -1141,7 +1273,7 @@ Item {
         objectName: "frame_shell"
         anchors.fill: parent
         titlebar_height: 32
-        edge_resize_extent: 8
+        resize_target_extent: 8
         resize_enabled: true
     }
 }
@@ -1536,7 +1668,7 @@ Item {
         frame_gap: Math.max(0, root.reduced_resize_border - root.frame_edge)
         frame_inner_edge: root.frame_edge
         frame_inner_edge_color: "#2a313c"
-        edge_resize_extent: root.reduced_resize_border
+        resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
         device_pixel_ratio: root.test_device_pixel_ratio
         titlebar_height: Math.min(root.reduced_titlebar_height, root.height)
         active: true
@@ -1804,7 +1936,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 32
-        resize_border_width: 6
+        resize_target_extent: 11
         device_pixel_ratio: 1.25
     }
 }
@@ -1827,7 +1959,7 @@ Item {
             find_descendant(root_object.get(), QStringLiteral("vnm_animated_mark")));
         QVERIFY(mark != nullptr);
         const QPointF mark_origin = mark->mapToItem(root, QPointF(0.0, 0.0));
-        QVERIFY(nearly_equal(mark_origin.x(), 6.4));
+        QVERIFY(nearly_equal(mark_origin.x(), 3.2));
         QVERIFY(vnm_qml_chrome::rect_has_snapped_physical_edges(
             QRectF(mark_origin.x(), 0.0, mark->width(), 0.0),
             1.25));
@@ -1835,11 +1967,11 @@ Item {
         auto* top_left_resize_area = qobject_cast<QQuickItem*>(
             find_descendant(root_object.get(), QStringLiteral("top_left_resize_area")));
         QVERIFY(top_left_resize_area != nullptr);
-        QVERIFY(nearly_equal(top_left_resize_area->width(),  6.4));
-        QVERIFY(nearly_equal(top_left_resize_area->height(), 6.4));
+        QVERIFY(nearly_equal(top_left_resize_area->width(),  11.2));
+        QVERIFY(nearly_equal(top_left_resize_area->height(), 11.2));
     }
 
-    void resize_layers_preserve_fractional_resize_border_widths()
+    void resize_layers_preserve_fractional_resize_target_extents()
     {
         QQmlEngine engine;
         QVERIFY(vnm_init_qml_chrome_runtime(engine));
@@ -1855,7 +1987,7 @@ Item {
     VNM_ChromeSideResizeLayer {
         objectName: "side_layer"
         anchors.fill: parent
-        resize_border_width: 5.6
+        resize_target_extent: 5.6
     }
 
     VNM_ChromeBottomResizeLayer {
@@ -1863,8 +1995,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: resize_border_width
-        resize_border_width: 5.6
+        height: implicitHeight
+        resize_target_extent: 5.6
     }
 
     VNM_ChromeTitleBar {
@@ -1873,7 +2005,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 32
-        resize_border_width: 5.6
+        resize_target_extent: 5.6
         device_pixel_ratio: 1.25
     }
 }
@@ -1882,7 +2014,7 @@ Item {
         std::unique_ptr<QObject> root_object = create_qml_object(
             engine,
             qml_source,
-            "qrc:/tests/fractional_resize_border_width_contract.qml");
+            "qrc:/tests/fractional_resize_target_extent_contract.qml");
         QVERIFY(root_object != nullptr);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
@@ -2186,7 +2318,7 @@ Item {
     VNM_ChromeSideResizeLayer {
         objectName: "side_layer"
         anchors.fill: parent
-        resize_border_width: 8
+        resize_target_extent: 8
     }
 
     VNM_ChromeBottomResizeLayer {
@@ -2194,8 +2326,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: resize_border_width
-        resize_border_width: 8
+        height: implicitHeight
+        resize_target_extent: 8
     }
 
     VNM_ChromeTitleBar {
@@ -2204,7 +2336,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 32
-        resize_border_width: 8
+        resize_target_extent: 8
     }
 }
 )";
@@ -2224,18 +2356,18 @@ Item {
         auto* titlebar = qobject_cast<QQuickItem*>(
             find_descendant(root_object.get(), QStringLiteral("chrome_titlebar")));
         QVERIFY(titlebar != nullptr);
-        auto* top_corner_owner = titlebar->childAt(2, 2);
+        auto* top_corner_owner = titlebar->childAt(1, 1);
         QVERIFY(top_corner_owner != nullptr);
         QCOMPARE(top_corner_owner->objectName(), QStringLiteral("top_left_resize_area"));
 
-        auto* bottom_owner = root->childAt(2, 138);
+        auto* bottom_owner = root->childAt(1, 138);
         QVERIFY(bottom_owner != nullptr);
         QCOMPARE(bottom_owner->objectName(), QStringLiteral("bottom_layer"));
 
         auto* bottom_layer = qobject_cast<QQuickItem*>(
             find_descendant(root_object.get(), QStringLiteral("bottom_layer")));
         QVERIFY(bottom_layer != nullptr);
-        auto* bottom_corner_owner = bottom_layer->childAt(2, 6);
+        auto* bottom_corner_owner = bottom_layer->childAt(1, 6);
         QVERIFY(bottom_corner_owner != nullptr);
         QCOMPARE(bottom_corner_owner->objectName(), QStringLiteral("bottom_left_resize_area"));
     }
@@ -2257,7 +2389,7 @@ Item {
         id: side_layer
         objectName: "side_layer"
         anchors.fill: parent
-        resize_border_width: 8
+        resize_target_extent: 8
     }
 
     function top_left_edges() {
@@ -2387,7 +2519,7 @@ Item {
     VNM_ChromeSideResizeLayer {
         objectName: "side_layer"
         anchors.fill: parent
-        resize_border_width: 8
+        resize_target_extent: 8
     }
 
     VNM_ChromeBottomResizeLayer {
@@ -2395,8 +2527,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: resize_border_width
-        resize_border_width: 8
+        height: implicitHeight
+        resize_target_extent: 8
     }
 }
 )";
