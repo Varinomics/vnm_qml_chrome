@@ -1324,6 +1324,7 @@ Item {
             QObject* area = find_descendant(root.get(), QString::fromLatin1(c.object_name));
             QVERIFY2(area != nullptr, c.object_name);
             QVERIFY2(!area->property("enabled").toBool(), c.object_name);
+            QVERIFY2(!area->property("visible").toBool(), c.object_name);
         }
     }
 

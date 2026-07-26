@@ -9,6 +9,7 @@ MouseArea {
     signal resize_requested(int edges)
 
     acceptedButtons: Qt.LeftButton
+    visible: enabled
 
     function resolved_edges(mouse) {
         return typeof resolve_edges === "function"
