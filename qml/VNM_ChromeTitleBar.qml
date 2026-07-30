@@ -13,7 +13,6 @@ Rectangle {
     property bool maximized: false
     property bool resize_enabled: true
     property real resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
-    property alias resize_border_width: titlebar.resize_target_extent
     property real top_frame_extent: 0
     property real left_frame_extent: 0
     property real right_frame_extent: 0

@@ -6,7 +6,6 @@ Item {
 
     property bool resize_enabled: true
     property real resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
-    property alias resize_border_width: layer.resize_target_extent
     property real left_frame_extent: 0
     property real right_frame_extent: 0
     property real bottom_frame_extent: 0

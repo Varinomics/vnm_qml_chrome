@@ -15,7 +15,6 @@ Item {
     property real frame_inner_edge: 1
     property color frame_inner_edge_color: "#2a313c"
     property real resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
-    property alias edge_resize_extent: shell.resize_target_extent
     property real device_pixel_ratio: Screen.devicePixelRatio
     property real render_target_physical_width: 0
     property real render_target_physical_height: 0

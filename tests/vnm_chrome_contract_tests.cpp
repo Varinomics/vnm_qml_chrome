@@ -685,7 +685,6 @@ Item {
         QVERIFY(side_layer != nullptr);
         QVERIFY(has_property(side_layer, "resize_enabled"));
         QVERIFY(has_property(side_layer, "resize_target_extent"));
-        QVERIFY(has_property(side_layer, "resize_border_width"));
         QVERIFY(has_property(side_layer, "left_frame_extent"));
         QVERIFY(has_property(side_layer, "right_frame_extent"));
         QVERIFY(has_signal(side_layer, "resize_requested(int)"));
@@ -694,7 +693,6 @@ Item {
         QVERIFY(bottom_layer != nullptr);
         QVERIFY(has_property(bottom_layer, "resize_enabled"));
         QVERIFY(has_property(bottom_layer, "resize_target_extent"));
-        QVERIFY(has_property(bottom_layer, "resize_border_width"));
         QVERIFY(has_property(bottom_layer, "bottom_frame_extent"));
         QVERIFY(has_signal(bottom_layer, "resize_requested(int)"));
 
@@ -740,7 +738,6 @@ Item {
             "maximized",
             "resize_enabled",
             "resize_target_extent",
-            "resize_border_width",
             "top_frame_extent",
             "left_frame_extent",
             "right_frame_extent",
@@ -811,7 +808,6 @@ Item {
             "frame_inner_edge",
             "frame_inner_edge_color",
             "resize_target_extent",
-            "edge_resize_extent",
             "device_pixel_ratio",
             "render_target_physical_width",
             "render_target_physical_height",
