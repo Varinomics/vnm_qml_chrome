@@ -27,12 +27,12 @@ Rectangle {
     // (to their left, in list order). Each entry is a plain object:
     //   {
     //     object_name?: string,
-    //     glyph?: string, font_family?: string, pixel_size?: real,  // font icon
-    //     svg?: url,                                                 // or svg icon
+    //     component?: Component,  // the icon, centred in the button
     //     width?: real, tooltip?: string, hover_color?: color,
     //     action?: function,
     //   }
-    // A font glyph follows the titlebar theme colour; an svg is drawn as-is.
+    // The icon component is instantiated filling the button, and paints its
+    // own content; `theme.titlebar_button_icon` is the colour to match.
     property var custom_buttons: []
     property bool minimize_button_visible: true
     property bool maximize_button_visible: true
@@ -288,31 +288,19 @@ Rectangle {
                         }
                     }
 
-                    Text {
-                        anchors.centerIn: parent
-                        visible: (modelData.glyph !== undefined) && (modelData.glyph.length > 0)
-                        text: visible ? modelData.glyph : ""
-                        color: titlebar.theme.titlebar_button_icon
-                        font.family: (modelData.font_family !== undefined)
-                            ? modelData.font_family
-                            : Qt.application.font.family
-                        font.pixelSize: (modelData.pixel_size !== undefined)
-                            ? modelData.pixel_size
-                            : 14
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        visible: (modelData.svg !== undefined) && (String(modelData.svg).length > 0)
-                        source: visible ? modelData.svg : ""
-                        sourceSize.width: (modelData.pixel_size !== undefined)
-                            ? modelData.pixel_size
-                            : 16
-                        sourceSize.height: (modelData.pixel_size !== undefined)
-                            ? modelData.pixel_size
-                            : 16
-                        fillMode: Image.PreserveAspectFit
-                        smooth: true
+                    // The button's icon, drawn by the app. Vector content is
+                    // the only shape offered because it is the only one that
+                    // looks the same everywhere: the icon fonts that carry a
+                    // given symbol differ per system, so a glyph is drawn by a
+                    // different designer on each one and is missing entirely
+                    // where no installed family carries it. The slot fills the
+                    // button so loaded content can centre itself against the
+                    // same box the built-in window controls paint into.
+                    Loader {
+                        anchors.fill: parent
+                        active: modelData.component !== undefined
+                            && modelData.component !== null
+                        sourceComponent: active ? modelData.component : null
                     }
                 }
             }

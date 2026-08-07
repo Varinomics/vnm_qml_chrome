@@ -1180,7 +1180,6 @@ Item {
         }
         custom_buttons: [{
             object_name: "shell_custom_button",
-            glyph: "S",
             width: 38
         }]
     }
@@ -2164,7 +2163,7 @@ Item {
         QVERIFY(minimize_button->isVisible());
     }
 
-    void titlebar_custom_buttons_render_glyph_and_invoke_action()
+    void titlebar_custom_buttons_place_and_invoke_action()
     {
         QQmlEngine engine;
         QVERIFY(vnm_init_qml_chrome_runtime(engine));
@@ -2186,8 +2185,6 @@ Item {
         title: "Custom"
         custom_buttons: [{
             object_name: "probe_button",
-            glyph: "A",
-            pixel_size: 14,
             width: 40,
             tooltip: "Probe",
             action: function() { activations += 1 }
@@ -2230,6 +2227,72 @@ Item {
         QVERIFY(QMetaObject::invokeMethod(probe, "clicked"));
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         QCOMPARE(root->property("activations").toInt(), 1);
+    }
+
+    void titlebar_custom_buttons_load_vector_component()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+Item {
+    width: 500
+    height: 60
+
+    Component {
+        id: vector_icon
+
+        Item {
+            objectName: "probe_vector_icon"
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+        }
+    }
+
+    VNM_ChromeTitleBar {
+        objectName: "chrome_titlebar"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        title: "Custom"
+        custom_buttons: [{
+            object_name: "probe_button",
+            component: vector_icon,
+            width: 40
+        }]
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/titlebar_custom_button_component_contract.qml");
+        QVERIFY(root != nullptr);
+        auto* root_item = qobject_cast<QQuickItem*>(root.get());
+        QVERIFY(root_item != nullptr);
+        root_item->ensurePolished();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        auto* probe = qobject_cast<QQuickItem*>(
+            find_descendant(root.get(), QStringLiteral("probe_button")));
+        QVERIFY(probe != nullptr);
+
+        // The component is instantiated inside the button, so an app can draw
+        // an icon that does not depend on the fonts the host system installed.
+        auto* icon = qobject_cast<QQuickItem*>(
+            find_descendant(probe, QStringLiteral("probe_vector_icon")));
+        QVERIFY(icon != nullptr);
+        QVERIFY(icon->isVisible());
+
+        // The slot fills the button, so centred content lands on the button's
+        // own centre rather than on a zero-sized loader in its corner.
+        const QPointF icon_centre = icon->mapToItem(
+            probe, QPointF(icon->width() / 2.0, icon->height() / 2.0));
+        QVERIFY(nearly_equal(icon_centre.x(), probe->width() / 2.0));
+        QVERIFY(nearly_equal(icon_centre.y(), probe->height() / 2.0));
     }
 
     void titlebar_title_has_margin_after_mark_without_actions()
