@@ -69,10 +69,9 @@ Window {
         window: root
         frame_visible: false
         resize_enabled: chrome_shell.resize_enabled
-        resize_outward_margins: Qt.margins(
-            chrome_shell.left_resize_outward_extent,
-            chrome_shell.top_resize_outward_extent,
-            chrome_shell.right_resize_outward_extent,
-            chrome_shell.bottom_resize_outward_extent)
+        resize_outward_margins.left: chrome_shell.left_resize_outward_extent
+        resize_outward_margins.top: chrome_shell.top_resize_outward_extent
+        resize_outward_margins.right: chrome_shell.right_resize_outward_extent
+        resize_outward_margins.bottom: chrome_shell.bottom_resize_outward_extent
     }
 }

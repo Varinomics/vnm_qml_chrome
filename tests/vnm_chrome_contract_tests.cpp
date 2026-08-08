@@ -472,6 +472,19 @@ Window {
 
         std::unique_ptr<QObject> root(component.create());
         QVERIFY(root != nullptr);
+
+        auto* shell = find_descendant(root.get(), QStringLiteral("chrome_frame_shell"));
+        auto* native_frame = root->findChild<VNM_NativeWindowFrame*>();
+        QVERIFY(shell        != nullptr);
+        QVERIFY(native_frame != nullptr);
+
+        const QMarginsF expected_margins(
+            shell->property("left_resize_outward_extent").toReal(),
+            shell->property("top_resize_outward_extent").toReal(),
+            shell->property("right_resize_outward_extent").toReal(),
+            shell->property("bottom_resize_outward_extent").toReal());
+        QVERIFY(!expected_margins.isNull());
+        QCOMPARE(native_frame->resize_outward_margins(), expected_margins);
     }
 
     void runtime_bootstrap_registers_manual_qrc_import()
