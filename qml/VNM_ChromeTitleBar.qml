@@ -16,6 +16,9 @@ Rectangle {
     property real top_frame_extent: 0
     property real left_frame_extent: 0
     property real right_frame_extent: 0
+    // Visual content may align to a client surface independently of the wider
+    // resize hit band. The default retains the resize-safe shared-chrome inset.
+    property real content_left_inset: snapped_left_resize_near_extent
     property real device_pixel_ratio: Screen.devicePixelRatio
     property bool animated_mark_visible: true
     property string activity_marker_text: ""
@@ -70,6 +73,8 @@ Rectangle {
         snapped_extent(right_resize_outward_extent)
     readonly property real snapped_right_resize_hit_extent:
         snapped_right_resize_near_extent + snapped_right_resize_outward_extent
+    readonly property real snapped_content_left_inset:
+        snapped_extent(non_negative(content_left_inset))
     readonly property real content_border_width:
         1 / VNM_chrome_geometry.normalized_device_pixel_ratio(device_pixel_ratio)
     readonly property real window_frame_top_width:
@@ -171,7 +176,7 @@ Rectangle {
         id: content_layout
 
         anchors.fill: parent
-        anchors.leftMargin: titlebar.snapped_left_resize_near_extent
+        anchors.leftMargin: titlebar.snapped_content_left_inset
         spacing: 0
         z: 2
 

@@ -830,6 +830,7 @@ Item {
             "active",
             "maximized",
             "activity_marker_text",
+            "titlebar_content_left_inset",
             "leading_action_component",
             "trailing_action_component",
             "custom_buttons",
@@ -1971,6 +1972,20 @@ Item {
         QVERIFY(nearly_equal(mark_origin.x(), 3.2));
         QVERIFY(vnm_qml_chrome::rect_has_snapped_physical_edges(
             QRectF(mark_origin.x(), 0.0, mark->width(), 0.0),
+            1.25));
+
+        QVERIFY(titlebar->setProperty("content_left_inset", 5.7));
+        root->ensurePolished();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        const QPointF overridden_mark_origin =
+            mark->mapToItem(root, QPointF(0.0, 0.0));
+        QVERIFY(nearly_equal(overridden_mark_origin.x(), 5.6));
+        QVERIFY(vnm_qml_chrome::rect_has_snapped_physical_edges(
+            QRectF(
+                overridden_mark_origin.x(),
+                0.0,
+                mark->width(),
+                0.0),
             1.25));
 
         auto* top_left_resize_area = qobject_cast<QQuickItem*>(
