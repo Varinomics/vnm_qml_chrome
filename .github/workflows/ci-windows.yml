@@ -24,6 +24,8 @@ jobs:
           version: 6.11.1
           arch: win64_msvc2022_64
           cache: true
+          # aqtinstall 3.3.0 predates Qt 6.11's Windows repository layout.
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@8c3695d4a4e1ceabf6a74dc6c79681656dc6b74b
 
       - name: Configure
         run: >
