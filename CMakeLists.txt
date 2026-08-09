@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS
+set(vnm_qml_chrome_minimum_qt_version 6.11.1)
+
+find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     Core
     Gui
     Qml
@@ -70,8 +72,12 @@ endif()
 
 if(VNM_QML_CHROME_BUILD_TESTS)
     include(CTest)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
-    find_package(Qt6Gui REQUIRED COMPONENTS QOffscreenIntegrationPlugin)
+    find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS Test)
+    find_package(
+        Qt6Gui
+        ${vnm_qml_chrome_minimum_qt_version}
+        REQUIRED
+        COMPONENTS QOffscreenIntegrationPlugin)
 
     if(WIN32)
         set(vnm_qml_chrome_qt_runtime_path

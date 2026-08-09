@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: FreeBSD 15.0 / system Qt
+    name: FreeBSD 15.0 / Qt >= 6.11.1
     runs-on: ubuntu-latest
 
     steps:
