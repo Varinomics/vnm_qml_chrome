@@ -6,12 +6,16 @@ Item {
     property VNM_ChromeTheme theme: VNM_ChromeTheme {}
     property real mark_size: 20
     property bool move_enabled: false
+    property bool alt_click_enabled: false
     property int move_drag_threshold: 2
+    property bool alt_reveal_forced: false
     property bool hover_active:
         icon_hover.hovered && !alt_reveal_active && !icon_press_area.pressed
     property bool alt_reveal_active:
         !icon_press_area.pressed
-        && (alt_hover.hovered || Math.abs(icon_rotor.rotation) > 0.01)
+        && (alt_reveal_forced
+            || alt_hover.hovered
+            || Math.abs(icon_rotor.rotation) > 0.01)
     readonly property real orange_scale: 290 / 193
     readonly property int alt_reveal_duration: 213
     readonly property real hover_circle_radius_inset: 0.5
@@ -19,6 +23,7 @@ Item {
 
     signal move_requested()
     signal maximize_toggle_requested()
+    signal alt_click_requested()
 
     function maybe_start_system_move(mouse) {
         if (!move_enabled
@@ -82,13 +87,17 @@ Item {
 
         Item {
             id: icon_rotor
+            objectName: "vnm_mark_rotor"
 
-            x: alt_hover.hovered ? -mark.mark_size * 0.245998 : 0
+            readonly property bool alt_pose_active:
+                mark.alt_reveal_forced || alt_hover.hovered
+
+            x: alt_pose_active ? -mark.mark_size * 0.245998 : 0
             y: mark.mark_size
             width: mark.mark_size
             height: mark.mark_size
-            scale: alt_hover.hovered ? 1.055 : 1.0
-            rotation: alt_hover.hovered ? 45 : 0
+            scale: alt_pose_active ? 1.055 : 1.0
+            rotation: alt_pose_active ? 45 : 0
             transformOrigin: Item.Center
 
             Behavior on x {
@@ -186,6 +195,14 @@ Item {
         acceptedButtons: Qt.LeftButton
 
         onPressed: (mouse) => {
+            if (mark.alt_click_enabled &&
+                mouse.button === Qt.LeftButton &&
+                (mouse.modifiers & Qt.AltModifier)) {
+                mark.alt_click_requested()
+                mouse.accepted = true
+                return
+            }
+
             if (mouse.button === Qt.LeftButton) {
                 system_move_press_x = mouse.x
                 system_move_press_y = mouse.y

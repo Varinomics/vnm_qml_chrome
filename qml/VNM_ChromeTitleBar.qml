@@ -9,6 +9,7 @@ Rectangle {
 
     property VNM_ChromeTheme theme: VNM_ChromeTheme {}
     property string title: ""
+    property bool title_editing_enabled: false
     property bool active: true
     property bool maximized: false
     property bool resize_enabled: true
@@ -92,6 +93,7 @@ Rectangle {
     signal minimize_requested()
     signal maximize_toggle_requested()
     signal close_requested()
+    signal title_edit_accepted(string title)
 
     function non_negative(value) {
         return isFinite(value) ? Math.max(0, value) : 0
@@ -101,8 +103,68 @@ Rectangle {
         return VNM_chrome_geometry.snapped_logical_edge(value, device_pixel_ratio)
     }
 
+    function begin_title_edit() {
+        if (!title_editing_enabled) {
+            return false
+        }
+        if (title_editor_frame.visible) {
+            return true
+        }
+
+        title_editor.previous_focus_item = titlebar.Window.window
+            ? titlebar.Window.window.activeFocusItem
+            : null
+        title_editor.text = titlebar.title
+        title_editor_frame.visible = true
+        title_editor.forceActiveFocus()
+        title_editor.selectAll()
+        return true
+    }
+
+    function maybe_begin_title_edit(mouse) {
+        if (mouse.button !== Qt.LeftButton ||
+            !(mouse.modifiers & Qt.AltModifier) ||
+            !begin_title_edit()) {
+            return false
+        }
+
+        mouse.accepted = true
+        return true
+    }
+
+    function accept_title_edit(restore_previous_focus = true) {
+        if (!title_editor_frame.visible || title_editor.finishing_edit) {
+            return
+        }
+
+        const accepted_title = title_editor.text
+        finish_title_edit(restore_previous_focus)
+        titlebar.title_edit_accepted(accepted_title)
+    }
+
+    function cancel_title_edit() {
+        finish_title_edit(true)
+    }
+
+    function finish_title_edit(restore_previous_focus) {
+        if (!title_editor_frame.visible || title_editor.finishing_edit) {
+            return
+        }
+
+        title_editor.finishing_edit = true
+        const previous_focus_item = title_editor.previous_focus_item
+        title_editor_frame.visible = false
+        title_editor.previous_focus_item = null
+        title_editor.finishing_edit = false
+        if (restore_previous_focus && previous_focus_item) {
+            previous_focus_item.forceActiveFocus()
+        }
+    }
+
     function maybe_start_system_move(move_area, mouse) {
-        if (move_area.system_move_started || !(mouse.buttons & Qt.LeftButton)) {
+        if (title_editor_frame.visible ||
+            move_area.system_move_started ||
+            !(mouse.buttons & Qt.LeftButton)) {
             return
         }
 
@@ -121,6 +183,12 @@ Rectangle {
     height: 32
     color: theme.titlebar
     z: 40
+
+    onTitle_editing_enabledChanged: {
+        if (!title_editing_enabled) {
+            cancel_title_edit()
+        }
+    }
 
     Rectangle {
         objectName: "titlebar_window_frame_top"
@@ -153,6 +221,13 @@ Rectangle {
                 system_move_press_x = mouse.x
                 system_move_press_y = mouse.y
                 system_move_started = false
+            }
+
+            if (titlebar.maybe_begin_title_edit(mouse)) {
+                return
+            }
+
+            if (mouse.button === Qt.LeftButton) {
                 mouse.accepted = true
             }
         }
@@ -165,7 +240,9 @@ Rectangle {
         onCanceled: system_move_started = false
 
         onDoubleClicked: (mouse) => {
-            if (mouse.button === Qt.LeftButton && titlebar.maximize_button_visible) {
+            if (!title_editor_frame.visible &&
+                mouse.button === Qt.LeftButton &&
+                titlebar.maximize_button_visible) {
                 titlebar.maximize_toggle_requested()
                 mouse.accepted = true
             }
@@ -186,8 +263,10 @@ Rectangle {
 
             theme: titlebar.theme
             mark_size: 20
-            move_enabled: true
+            move_enabled: !title_editor_frame.visible
+            alt_click_enabled: titlebar.title_editing_enabled
             move_drag_threshold: titlebar.move_drag_threshold
+            alt_reveal_forced: title_editor_frame.visible
             visible: titlebar.animated_mark_visible
             Layout.preferredWidth: mark_size
             Layout.preferredHeight: mark_size
@@ -195,6 +274,7 @@ Rectangle {
             Layout.rightMargin: titlebar.animated_mark_visible ? 8 : 0
             onMove_requested: titlebar.move_requested()
             onMaximize_toggle_requested: titlebar.maximize_toggle_requested()
+            onAlt_click_requested: titlebar.begin_title_edit()
         }
 
         Label {
@@ -246,6 +326,53 @@ Rectangle {
             color: titlebar.theme.titlebar_text
             elide: Text.ElideRight
             font.pointSize: 9.5
+            visible: !title_editor_frame.visible
+        }
+
+        Rectangle {
+            id: title_editor_frame
+            objectName: "title_editor_frame"
+
+            Layout.alignment: Qt.AlignVCenter
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredHeight: 24
+            Layout.rightMargin: 8
+            visible: false
+            color: titlebar.theme.titlebar_button_hover
+            border.color: titlebar.theme.titlebar_activity_marker
+            border.width: titlebar.content_border_width
+            radius: 2
+
+            TextInput {
+                id: title_editor
+                objectName: "title_editor"
+
+                property Item previous_focus_item: null
+                property bool finishing_edit: false
+
+                anchors.fill: parent
+                anchors.leftMargin: 6
+                anchors.rightMargin: 6
+                visible: title_editor_frame.visible
+                color: titlebar.theme.titlebar_text
+                selectionColor: titlebar.theme.titlebar_activity_marker
+                selectedTextColor: titlebar.theme.titlebar
+                clip: true
+                selectByMouse: true
+                verticalAlignment: TextInput.AlignVCenter
+                font.pointSize: 9.5
+
+                onAccepted: titlebar.accept_title_edit()
+                onActiveFocusChanged: {
+                    if (title_editor_frame.visible
+                        && !activeFocus
+                        && !finishing_edit) {
+                        titlebar.accept_title_edit(false)
+                    }
+                }
+                Keys.onEscapePressed: titlebar.cancel_title_edit()
+            }
         }
 
         Loader {

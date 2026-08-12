@@ -654,11 +654,14 @@ Item {
         QVERIFY(has_property(mark, "theme"));
         QVERIFY(has_property(mark, "mark_size"));
         QVERIFY(has_property(mark, "move_enabled"));
+        QVERIFY(has_property(mark, "alt_click_enabled"));
         QVERIFY(has_property(mark, "move_drag_threshold"));
+        QVERIFY(has_property(mark, "alt_reveal_forced"));
         QVERIFY(has_property(mark, "hover_active"));
         QVERIFY(has_property(mark, "alt_reveal_active"));
         QVERIFY(has_signal(mark, "move_requested()"));
         QVERIFY(has_signal(mark, "maximize_toggle_requested()"));
+        QVERIFY(has_signal(mark, "alt_click_requested()"));
 
         QObject* window_button = find_descendant(root.get(), QStringLiteral("window_button"));
         QVERIFY(window_button != nullptr);
@@ -747,6 +750,7 @@ Item {
         const char* titlebar_properties[] = {
             "theme",
             "title",
+            "title_editing_enabled",
             "active",
             "maximized",
             "resize_enabled",
@@ -770,6 +774,7 @@ Item {
         QVERIFY(has_signal(titlebar, "minimize_requested()"));
         QVERIFY(has_signal(titlebar, "maximize_toggle_requested()"));
         QVERIFY(has_signal(titlebar, "close_requested()"));
+        QVERIFY(has_signal(titlebar, "title_edit_accepted(QString)"));
     }
 
     void frame_shell_is_importable_from_qrc_and_exposes_contract()
@@ -827,6 +832,7 @@ Item {
             "titlebar_height",
             "resize_enabled",
             "title",
+            "title_editing_enabled",
             "active",
             "maximized",
             "activity_marker_text",
@@ -853,6 +859,7 @@ Item {
         QVERIFY(has_signal(shell, "minimize_requested()"));
         QVERIFY(has_signal(shell, "maximize_toggle_requested()"));
         QVERIFY(has_signal(shell, "close_requested()"));
+        QVERIFY(has_signal(shell, "title_edit_accepted(QString)"));
 
         QVERIFY(find_descendant(
             root.get(),
@@ -1172,6 +1179,7 @@ Item {
         objectName: "frame_shell"
         anchors.fill: parent
         title: "Shell Commands"
+        title_editing_enabled: true
         active: false
         maximized: true
         activity_marker_text: "!"
@@ -1216,6 +1224,7 @@ Item {
         QVERIFY(titlebar != nullptr);
 
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Shell Commands"));
+        QCOMPARE(titlebar->property("title_editing_enabled").toBool(), true);
         QCOMPARE(titlebar->property("active").toBool(), false);
         QCOMPARE(titlebar->property("maximized").toBool(), true);
         QCOMPARE(titlebar->property("activity_marker_text").toString(), QStringLiteral("!"));
@@ -1242,11 +1251,13 @@ Item {
         QSignalSpy minimize_spy(shell, SIGNAL(minimize_requested()));
         QSignalSpy maximize_spy(shell, SIGNAL(maximize_toggle_requested()));
         QSignalSpy close_spy(shell, SIGNAL(close_requested()));
+        QSignalSpy title_edit_spy(shell, SIGNAL(title_edit_accepted(QString)));
         QVERIFY(move_spy.isValid());
         QVERIFY(resize_spy.isValid());
         QVERIFY(minimize_spy.isValid());
         QVERIFY(maximize_spy.isValid());
         QVERIFY(close_spy.isValid());
+        QVERIFY(title_edit_spy.isValid());
 
         QVERIFY(QMetaObject::invokeMethod(titlebar, "move_requested"));
         QVERIFY(QMetaObject::invokeMethod(
@@ -1256,6 +1267,10 @@ Item {
         QVERIFY(QMetaObject::invokeMethod(titlebar, "minimize_requested"));
         QVERIFY(QMetaObject::invokeMethod(titlebar, "maximize_toggle_requested"));
         QVERIFY(QMetaObject::invokeMethod(titlebar, "close_requested"));
+        QVERIFY(QMetaObject::invokeMethod(
+            titlebar,
+            "title_edit_accepted",
+            Q_ARG(QString, QStringLiteral("User title"))));
 
         QCOMPARE(move_spy.count(), 1);
         QCOMPARE(resize_spy.count(), 1);
@@ -1263,6 +1278,10 @@ Item {
         QCOMPARE(minimize_spy.count(), 1);
         QCOMPARE(maximize_spy.count(), 1);
         QCOMPARE(close_spy.count(), 1);
+        QCOMPARE(title_edit_spy.count(), 1);
+        QCOMPARE(
+            title_edit_spy.takeFirst().at(0).toString(),
+            QStringLiteral("User title"));
     }
 
     void frame_shell_forwards_edge_resize_requests_and_disable_state()
@@ -2384,10 +2403,18 @@ VNM_AnimatedMark {
         QVERIFY(root != nullptr);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
+        QObject* rotor = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_rotor"));
+        QVERIFY(rotor != nullptr);
         QCOMPARE(root->property("state").toString(), QString());
         QVERIFY(root->setProperty("hover_active", true));
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         QCOMPARE(root->property("state").toString(), QStringLiteral("normal_hover"));
+
+        QVERIFY(root->setProperty("alt_reveal_forced", true));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(rotor->property("rotation").toReal() - 45.0) < 0.01,
+            500);
     }
 
     void resize_corner_ownership_prefers_titlebar_and_bottom_layers()
@@ -2751,6 +2778,141 @@ Item {
             "over_threshold_move_is_synchronous",
             Q_RETURN_ARG(QVariant, over_threshold_result)));
         QVERIFY(over_threshold_result.toBool());
+    }
+
+    void titlebar_title_editing_is_opt_in_and_commits_completed_edits()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+Window {
+    id: root
+
+    width: 420
+    height: 48
+    visible: true
+
+    VNM_ChromeTitleBar {
+        id: chrome_titlebar
+        objectName: "chrome_titlebar"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        title: "Process title"
+    }
+
+    Item {
+        id: focus_sink
+        objectName: "focus_sink"
+    }
+
+    QtObject {
+        id: mouse_probe
+
+        property int button: Qt.LeftButton
+        property int modifiers: Qt.AltModifier
+        property bool accepted: false
+    }
+
+    function try_alt_click() {
+        mouse_probe.accepted = false
+        return chrome_titlebar.maybe_begin_title_edit(mouse_probe)
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/titlebar_title_editing_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QObject* titlebar = find_descendant(root.get(), QStringLiteral("chrome_titlebar"));
+        QObject* editor   = find_descendant(root.get(), QStringLiteral("title_editor"));
+        QObject* editor_frame = find_descendant(
+            root.get(), QStringLiteral("title_editor_frame"));
+        QObject* animated_mark = find_descendant(
+            root.get(), QStringLiteral("vnm_animated_mark"));
+        QObject* focus_sink = find_descendant(root.get(), QStringLiteral("focus_sink"));
+        QVERIFY(titlebar != nullptr);
+        QVERIFY(editor   != nullptr);
+        QVERIFY(editor_frame != nullptr);
+        QVERIFY(animated_mark != nullptr);
+        QVERIFY(focus_sink != nullptr);
+        QCOMPARE(titlebar->property("title_editing_enabled").toBool(), false);
+
+        QVariant began_editing;
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "try_alt_click",
+            Q_RETURN_ARG(QVariant, began_editing)));
+        QCOMPARE(began_editing.toBool(), false);
+        QCOMPARE(editor->property("visible").toBool(), false);
+
+        QVERIFY(titlebar->setProperty("title_editing_enabled", true));
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "try_alt_click",
+            Q_RETURN_ARG(QVariant, began_editing)));
+        QCOMPARE(began_editing.toBool(), true);
+        QCOMPARE(editor->property("visible").toBool(), true);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("Process title"));
+        QCOMPARE(editor_frame->property("visible").toBool(), true);
+        QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), true);
+        QCOMPARE(animated_mark->property("alt_click_enabled").toBool(), true);
+
+        QVERIFY(editor->setProperty("text", QStringLiteral("Draft title")));
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "try_alt_click",
+            Q_RETURN_ARG(QVariant, began_editing)));
+        QCOMPARE(began_editing.toBool(), true);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("Draft title"));
+
+        QSignalSpy accepted_spy(titlebar, SIGNAL(title_edit_accepted(QString)));
+        QVERIFY(accepted_spy.isValid());
+        QVERIFY(editor->setProperty("text", QStringLiteral("User title")));
+        QVERIFY(QMetaObject::invokeMethod(editor, "accepted"));
+        QCOMPARE(accepted_spy.count(), 1);
+        QCOMPARE(
+            accepted_spy.takeFirst().at(0).toString(),
+            QStringLiteral("User title"));
+        QCOMPARE(editor->property("visible").toBool(), false);
+        QCOMPARE(editor_frame->property("visible").toBool(), false);
+        QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), false);
+        QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
+
+        QVERIFY(QMetaObject::invokeMethod(animated_mark, "alt_click_requested"));
+        QCOMPARE(editor_frame->property("visible").toBool(), true);
+        QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), true);
+        auto* window = qobject_cast<QWindow*>(root.get());
+        QVERIFY(window != nullptr);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QCOMPARE(accepted_spy.count(), 0);
+        QCOMPARE(editor_frame->property("visible").toBool(), false);
+        QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
+
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "try_alt_click",
+            Q_RETURN_ARG(QVariant, began_editing)));
+        QCOMPARE(began_editing.toBool(), true);
+        QVERIFY(editor->setProperty("text", QStringLiteral("Focus loss title")));
+        QVERIFY(QMetaObject::invokeMethod(focus_sink, "forceActiveFocus"));
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QCOMPARE(accepted_spy.count(), 1);
+        QCOMPARE(
+            accepted_spy.takeFirst().at(0).toString(),
+            QStringLiteral("Focus loss title"));
+        QCOMPARE(editor_frame->property("visible").toBool(), false);
+        QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), false);
+        QCOMPARE(focus_sink->property("activeFocus").toBool(), true);
+        QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
     }
 };
 

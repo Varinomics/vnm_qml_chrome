@@ -22,6 +22,7 @@ Item {
     property bool resize_enabled: true
 
     property alias title: titlebar.title
+    property alias title_editing_enabled: titlebar.title_editing_enabled
     property alias active: titlebar.active
     property alias maximized: titlebar.maximized
     property alias activity_marker_text: titlebar.activity_marker_text
@@ -141,6 +142,7 @@ Item {
     signal minimize_requested()
     signal maximize_toggle_requested()
     signal close_requested()
+    signal title_edit_accepted(string title)
 
     function non_negative(value) {
         return isFinite(value) ? Math.max(0, value) : 0
@@ -275,6 +277,7 @@ Item {
         onMinimize_requested: shell.minimize_requested()
         onMaximize_toggle_requested: shell.maximize_toggle_requested()
         onClose_requested: shell.close_requested()
+        onTitle_edit_accepted: (title) => shell.title_edit_accepted(title)
     }
 
     Item {
