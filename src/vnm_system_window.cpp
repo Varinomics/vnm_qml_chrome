@@ -1,5 +1,9 @@
 #include "vnm_qml_chrome/vnm_system_window.h"
 
+#include <QCoreApplication>
+#include <QEvent>
+#include <QGuiApplication>
+#include <QKeyEvent>
 #include <QSize>
 #include <QWindow>
 
@@ -76,6 +80,92 @@ vnm_qml_chrome::System_window::System_window(QObject* parent)
 :
     QObject(parent)
 {
+    if (QCoreApplication::instance()) {
+        QCoreApplication::instance()->installEventFilter(this);
+    }
+
+    update_alt_modifier_active();
+}
+
+qint64 vnm_qml_chrome::System_window::process_id() const
+{
+    return QCoreApplication::applicationPid();
+}
+
+bool vnm_qml_chrome::System_window::alt_modifier_active() const
+{
+    return m_alt_modifier_active;
+}
+
+bool vnm_qml_chrome::System_window::eventFilter(QObject* watched, QEvent* event)
+{
+    switch (event->type()) {
+        case QEvent::KeyPress:
+        case QEvent::KeyRelease: {
+            const auto* key_event = static_cast<const QKeyEvent*>(event);
+            if (key_event->key() == Qt::Key_Alt) {
+                // Windows removes the modifier bit from the event state for
+                // the modifier key itself ("invert state logic" in
+                // qwindowskeymapper.cpp), so neither key_event->modifiers()
+                // nor keyboardModifiers() can be trusted for Alt's own
+                // press/release. The event type carries the truth. (AltGr is
+                // deliberately not special-cased: on Windows it maps to
+                // Key_Alt, and elsewhere it does not imply AltModifier.)
+                // Known limitation: holding both physical Alt keys and
+                // releasing one reports "not held" until the next event.
+                set_alt_modifier_active(event->type() == QEvent::KeyPress);
+            }
+            else {
+                // modifier_buttons was already updated from this event in
+                // QGuiApplicationPrivate::processKeyEvent(), so the global
+                // query is fresh for every non-modifier key.
+                update_alt_modifier_active();
+            }
+            break;
+        }
+
+        case QEvent::ApplicationStateChange:
+            // Alt may have been released while another application had
+            // focus (e.g. Alt+Tab): that KeyRelease went elsewhere, so
+            // resync from the physical keyboard state.
+            sync_alt_modifier_active();
+            break;
+
+        default:
+            break;
+    }
+
+    return QObject::eventFilter(watched, event);
+}
+
+void vnm_qml_chrome::System_window::set_alt_modifier_active(bool active)
+{
+    if (active == m_alt_modifier_active) {
+        return;
+    }
+
+    m_alt_modifier_active = active;
+    Q_EMIT alt_modifier_active_changed();
+}
+
+void vnm_qml_chrome::System_window::update_alt_modifier_active()
+{
+    if (!QGuiApplication::instance()) {
+        return;
+    }
+
+    set_alt_modifier_active(
+        QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier));
+}
+
+void vnm_qml_chrome::System_window::sync_alt_modifier_active()
+{
+    if (!QGuiApplication::instance()) {
+        return;
+    }
+
+    set_alt_modifier_active(
+        QGuiApplication::queryKeyboardModifiers().testFlag(Qt::AltModifier));
 }
 
 bool vnm_qml_chrome::System_window::start_system_move(QWindow* window) const

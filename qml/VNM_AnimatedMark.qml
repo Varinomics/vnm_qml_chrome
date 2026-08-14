@@ -9,13 +9,46 @@ Item {
     property bool alt_click_enabled: false
     property int move_drag_threshold: 2
     property bool alt_reveal_forced: false
-    property bool hover_active:
-        icon_hover.hovered && !alt_reveal_active && !icon_press_area.pressed
+    property bool pid_reveal_enabled: false
+    // Reveal lifecycle: "" -> "forming" -> "elongating" -> "revealed"
+    // -> "retracting" -> "".
+    property string pid_phase: ""
+    property bool pid_pill_growing: true
+    readonly property bool pid_pill_active:
+        pid_phase === "elongating"
+        || pid_phase === "revealed"
+        || pid_phase === "retracting"
+    readonly property real pid_text_left_margin:
+        (mark_size - hover_circle_radius_inset) / 2 + 2
+    readonly property real pid_text_right_margin: 8
+    readonly property real pid_layout_width: pid_pill.x + pid_pill.width
+    readonly property real pid_pill_target_width: Math.max(
+        mark_size,
+        Math.ceil(pid_metrics.advanceWidth)
+            + pid_text_left_margin
+            + pid_text_right_margin)
+    readonly property bool alt_hover_active:
+        icon_hover.hovered && VNM_system_window.alt_modifier_active
+    // Single pose arbiter. The pill lifecycle dominates; the alt pose beats
+    // the hover circle; the hover circle additionally requires the alt pose
+    // (including its un-rotation tail) to be fully gone.
+    readonly property string pose: {
+        if (pid_phase !== "") {
+            return "pill"
+        }
+        if (alt_reveal_forced || alt_hover_active) {
+            return "alt"
+        }
+        if (icon_hover.hovered
+            && Math.abs(icon_rotor.rotation) <= 0.01
+            && (!icon_press_area.pressed || pid_reveal_enabled)) {
+            return "hover"
+        }
+        return "idle"
+    }
+    property bool hover_active: pose === "hover"
     property bool alt_reveal_active:
-        !icon_press_area.pressed
-        && (alt_reveal_forced
-            || alt_hover.hovered
-            || Math.abs(icon_rotor.rotation) > 0.01)
+        pose === "alt" || Math.abs(icon_rotor.rotation) > 0.01
     readonly property real orange_scale: 290 / 193
     readonly property int alt_reveal_duration: 213
     readonly property real hover_circle_radius_inset: 0.5
@@ -27,8 +60,10 @@ Item {
 
     function maybe_start_system_move(mouse) {
         if (!move_enabled
+                || mark.pid_pill_active
                 || icon_press_area.system_move_started
-                || !(mouse.buttons & Qt.LeftButton)) {
+                || !(mouse.buttons & Qt.LeftButton)
+                || (mouse.modifiers & Qt.AltModifier)) {
             return
         }
 
@@ -40,21 +75,95 @@ Item {
         }
 
         icon_press_area.system_move_started = true
+        mark.cancel_pid_reveal()
         move_requested()
         mouse.accepted = true
     }
 
+    function circle_settled() {
+        if (mark.state !== "normal_hover") {
+            return false
+        }
+
+        const target_radius = orange_mark.width / 2
+            - mark.hover_circle_radius_inset / mark.orange_scale
+        return Math.abs(orange_mark.scale - mark.orange_scale) < 0.01
+            && Math.abs(orange_mark.circle_x_offset - mark.hover_circle_x_offset) < 0.05
+            && Math.abs(orange_mark.radius - target_radius) < 0.05
+    }
+
+    function request_pid_reveal() {
+        if (!pid_reveal_enabled || pid_phase !== "" || alt_reveal_active) {
+            return
+        }
+
+        pid_phase = "forming"
+        pid_circle_settle_timer.start()
+    }
+
+    function cancel_pid_reveal() {
+        if (pid_phase !== "forming") {
+            return
+        }
+
+        pid_circle_settle_timer.stop()
+        pid_phase = ""
+    }
+
+    function begin_pid_elongation() {
+        pid_pill.width = mark_size
+        pid_edit.opacity = 0
+        pid_phase = "elongating"
+        pid_pill_growing = true
+        pid_pill_grow_animation.to = pid_pill_target_width
+        pid_pill_grow_animation.start()
+        pid_edit_fade_animation.to = 1
+        pid_edit_fade_animation.start()
+    }
+
+    function request_pid_retract() {
+        if (pid_phase !== "revealed" && pid_phase !== "elongating") {
+            return
+        }
+
+        pid_phase = "retracting"
+        pid_edit.focus = false
+        pid_pill_growing = false
+        pid_pill_grow_animation.stop()
+        pid_edit_fade_animation.stop()
+        pid_pill_grow_animation.to = mark_size
+        pid_pill_grow_animation.start()
+        pid_edit_fade_animation.to = 0
+        pid_edit_fade_animation.start()
+    }
+
+    function on_pid_pill_animation_stopped() {
+        if (pid_phase === "elongating" && pid_pill_growing) {
+            pid_phase = "revealed"
+            pid_edit.forceActiveFocus()
+        }
+        else if (pid_phase === "retracting" && !pid_pill_growing) {
+            // Also fires for the manual stop when a retract interrupts an
+            // elongation; only finish once the pill is fully closed.
+            if (pid_pill.width <= mark_size + 0.5) {
+                pid_edit.opacity = 0
+                pid_phase = ""
+            }
+        }
+    }
+
     width: mark_size
     height: mark_size
-    state: hover_active ? "normal_hover" : ""
+    state: (hover_active || pid_phase !== "") ? "normal_hover" : ""
 
     HoverHandler {
         id: icon_hover
-    }
 
-    HoverHandler {
-        id: alt_hover
-        acceptedModifiers: Qt.AltModifier
+        onHoveredChanged: {
+            if (!hovered) {
+                mark.cancel_pid_reveal()
+            }
+        }
     }
 
     Item {
@@ -90,7 +199,8 @@ Item {
             objectName: "vnm_mark_rotor"
 
             readonly property bool alt_pose_active:
-                mark.alt_reveal_forced || alt_hover.hovered
+                (mark.alt_reveal_forced || mark.alt_hover_active)
+                && mark.pid_phase === ""
 
             x: alt_pose_active ? -mark.mark_size * 0.245998 : 0
             y: mark.mark_size
@@ -129,7 +239,7 @@ Item {
                     Math.abs(orange_mark.scale - 1.0) > 0.01
                     || orange_mark.radius > 0.01
                     || Math.abs(orange_mark.circle_x_offset) > 0.01
-                visible: !mark.alt_reveal_active || animating
+                visible: (!mark.alt_reveal_active || animating) && !mark.pid_pill_active
 
                 Rectangle {
                     id: grey_mark
@@ -195,6 +305,18 @@ Item {
         acceptedButtons: Qt.LeftButton
 
         onPressed: (mouse) => {
+            if (mark.pid_pill_active
+                && !(mouse.modifiers & Qt.AltModifier)) {
+                mouse.accepted = true
+                return
+            }
+
+            if (mark.pid_pill_active) {
+                // Alt+click on the revealed pill: retract first, then let the
+                // normal Alt handling below run.
+                mark.request_pid_retract()
+            }
+
             if (mark.alt_click_enabled &&
                 mouse.button === Qt.LeftButton &&
                 (mouse.modifiers & Qt.AltModifier)) {
@@ -203,7 +325,18 @@ Item {
                 return
             }
 
+            if (mouse.modifiers & Qt.AltModifier) {
+                // Alt is reserved for the mark's own Alt behavior. When that
+                // is disabled, swallow the press so it cannot fall through
+                // to the title bar and start a move drag.
+                mouse.accepted = true
+                return
+            }
+
             if (mouse.button === Qt.LeftButton) {
+                // Start the reveal on press: the forced hover state keeps the
+                // circle intact instead of letting it un-form while pressed.
+                mark.request_pid_reveal()
                 system_move_press_x = mouse.x
                 system_move_press_y = mouse.y
                 system_move_started = false
@@ -219,9 +352,107 @@ Item {
         onCanceled: system_move_started = false
 
         onDoubleClicked: (mouse) => {
-            if (mark.move_enabled && mouse.button === Qt.LeftButton) {
+            if (mark.move_enabled
+                && !mark.pid_reveal_enabled
+                && mouse.button === Qt.LeftButton) {
                 mark.maximize_toggle_requested()
                 mouse.accepted = true
+            }
+        }
+    }
+
+    Rectangle {
+        id: pid_pill
+        objectName: "vnm_mark_pid_pill"
+
+        x: mark.hover_circle_x_offset
+        y: 0
+        z: 2
+        width: mark.mark_size
+        height: mark.mark_size
+        radius: (mark.mark_size - mark.hover_circle_radius_inset) / 2
+        // Fixed brand orange; white text is the legible foreground on it.
+        color: "#c44d28"
+        antialiasing: true
+        visible: mark.pid_pill_active
+
+        TextInput {
+            id: pid_edit
+            objectName: "vnm_mark_pid_edit"
+
+            anchors.left: parent.left
+            anchors.leftMargin: mark.pid_text_left_margin
+            anchors.right: parent.right
+            anchors.rightMargin: mark.pid_text_right_margin
+            anchors.verticalCenter: parent.verticalCenter
+            clip: true
+            readOnly: true
+            selectByMouse: true
+            persistentSelection: true
+            text: String(VNM_system_window.process_id)
+            color: "white"
+            selectionColor: mark.theme.titlebar
+            selectedTextColor: "white"
+            font.pointSize: 9.5
+            opacity: 0
+
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_C
+                    && (event.modifiers & Qt.ControlModifier)) {
+                    if (pid_edit.selectedText.length > 0) {
+                        pid_edit.copy()
+                        mark.request_pid_retract()
+                    }
+                    event.accepted = true
+                }
+            }
+            Keys.onEscapePressed: (event) => {
+                mark.request_pid_retract()
+                event.accepted = true
+            }
+        }
+    }
+
+    TextMetrics {
+        id: pid_metrics
+
+        font: pid_edit.font
+        text: pid_edit.text
+    }
+
+    NumberAnimation {
+        id: pid_pill_grow_animation
+
+        target: pid_pill
+        property: "width"
+        duration: 240
+        easing.type: Easing.InOutQuad
+        onStopped: mark.on_pid_pill_animation_stopped()
+    }
+
+    NumberAnimation {
+        id: pid_edit_fade_animation
+
+        target: pid_edit
+        property: "opacity"
+        duration: 240
+        easing.type: Easing.InOutQuad
+    }
+
+    Timer {
+        id: pid_circle_settle_timer
+
+        interval: 30
+        repeat: true
+        onTriggered: {
+            if (mark.pid_phase !== "forming") {
+                stop()
+                return
+            }
+
+            if (mark.circle_settled()) {
+                stop()
+                mark.begin_pid_elongation()
             }
         }
     }

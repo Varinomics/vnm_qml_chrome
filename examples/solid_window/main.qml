@@ -43,6 +43,7 @@ Window {
         title: root.title
         active: root.active
         maximized: root.visibility === Window.Maximized
+        mark_pid_reveal_enabled: true
         resize_enabled: root.visibility === Window.Windowed
         device_pixel_ratio: root.device_pixel_ratio
         frame_color: root.color

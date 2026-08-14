@@ -2,10 +2,12 @@
 
 #include "vnm_qml_chrome/vnm_chrome_geometry.h"
 #include "vnm_qml_chrome/vnm_native_window_frame.h"
+#include "vnm_qml_chrome/vnm_system_window.h"
 
 #include <QColor>
 #include <QGuiApplication>
 #include <QImage>
+#include <QKeyEvent>
 #include <QPointF>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -659,6 +661,9 @@ Item {
         QVERIFY(has_property(mark, "alt_reveal_forced"));
         QVERIFY(has_property(mark, "hover_active"));
         QVERIFY(has_property(mark, "alt_reveal_active"));
+        QVERIFY(has_property(mark, "pid_reveal_enabled"));
+        QVERIFY(has_property(mark, "pid_phase"));
+        QVERIFY(has_property(mark, "pid_layout_width"));
         QVERIFY(has_signal(mark, "move_requested()"));
         QVERIFY(has_signal(mark, "maximize_toggle_requested()"));
         QVERIFY(has_signal(mark, "alt_click_requested()"));
@@ -760,6 +765,7 @@ Item {
             "right_frame_extent",
             "device_pixel_ratio",
             "animated_mark_visible",
+            "mark_pid_reveal_enabled",
             "activity_marker_text",
             "window_frame_top_visible",
             "window_frame_width",
@@ -2415,6 +2421,87 @@ VNM_AnimatedMark {
         QTRY_VERIFY_WITH_TIMEOUT(
             qAbs(rotor->property("rotation").toReal() - 45.0) < 0.01,
             500);
+    }
+
+    void animated_mark_reveals_process_id_pill_on_request()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+VNM_AnimatedMark {
+    objectName: "animated_mark"
+    mark_size: 20
+    pid_reveal_enabled: true
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/animated_mark_pid_reveal_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QCOMPARE(root->property("pid_phase").toString(), QString());
+        QVERIFY(root->setProperty("hover_active", true));
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_reveal"));
+        QCOMPARE(root->property("pid_phase").toString(), QStringLiteral("forming"));
+
+        QTRY_VERIFY_WITH_TIMEOUT(
+            root->property("pid_phase").toString() == QStringLiteral("revealed"),
+            5000);
+
+        QObject* pill = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_pid_pill"));
+        QVERIFY(pill != nullptr);
+        QVERIFY(pill->property("visible").toBool());
+        QVERIFY(pill->property("width").toReal() > 20.0);
+        QVERIFY(root->property("pid_layout_width").toReal() > 20.0);
+
+        QObject* pid_edit = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_pid_edit"));
+        QVERIFY(pid_edit != nullptr);
+        QCOMPARE(
+            pid_edit->property("text").toString(),
+            QString::number(QCoreApplication::applicationPid()));
+        QVERIFY(pid_edit->property("selectedText").toString().isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(pid_edit->property("opacity").toReal() - 1.0) < 0.01,
+            1000);
+
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_retract"));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            root->property("pid_phase").toString().isEmpty(),
+            5000);
+        QVERIFY(!pill->property("visible").toBool());
+    }
+
+    void system_window_tracks_alt_modifier_state()
+    {
+        vnm_qml_chrome::System_window system_window;
+        QSignalSpy alt_spy(
+            &system_window,
+            &vnm_qml_chrome::System_window::alt_modifier_active_changed);
+        QObject event_target;
+
+        // Windows reports the Alt key's own press with the AltModifier bit
+        // removed from the event modifiers, and the release with the bit
+        // still set; the event type must carry the state.
+        QKeyEvent alt_press(QEvent::KeyPress, Qt::Key_Alt, Qt::NoModifier);
+        QCoreApplication::sendEvent(&event_target, &alt_press);
+        QVERIFY(system_window.alt_modifier_active());
+        QCOMPARE(alt_spy.count(), 1);
+
+        QKeyEvent alt_repeat(QEvent::KeyPress, Qt::Key_Alt, Qt::NoModifier);
+        QCoreApplication::sendEvent(&event_target, &alt_repeat);
+        QCOMPARE(alt_spy.count(), 1);
+
+        QKeyEvent alt_release(QEvent::KeyRelease, Qt::Key_Alt, Qt::AltModifier);
+        QCoreApplication::sendEvent(&event_target, &alt_release);
+        QVERIFY(!system_window.alt_modifier_active());
+        QCOMPARE(alt_spy.count(), 2);
     }
 
     void resize_corner_ownership_prefers_titlebar_and_bottom_layers()

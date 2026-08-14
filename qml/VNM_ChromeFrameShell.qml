@@ -26,6 +26,7 @@ Item {
     property alias active: titlebar.active
     property alias maximized: titlebar.maximized
     property alias activity_marker_text: titlebar.activity_marker_text
+    property alias mark_pid_reveal_enabled: titlebar.mark_pid_reveal_enabled
     property alias titlebar_content_left_inset: titlebar.content_left_inset
     property alias leading_action_component: titlebar.leading_action_component
     property alias trailing_action_component: titlebar.trailing_action_component

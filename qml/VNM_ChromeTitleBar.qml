@@ -22,6 +22,7 @@ Rectangle {
     property real content_left_inset: snapped_left_resize_near_extent
     property real device_pixel_ratio: Screen.devicePixelRatio
     property bool animated_mark_visible: true
+    property bool mark_pid_reveal_enabled: false
     property string activity_marker_text: ""
     property bool window_frame_top_visible: false
     property real window_frame_width: 0
@@ -267,8 +268,11 @@ Rectangle {
             alt_click_enabled: titlebar.title_editing_enabled
             move_drag_threshold: titlebar.move_drag_threshold
             alt_reveal_forced: title_editor_frame.visible
+            pid_reveal_enabled: titlebar.mark_pid_reveal_enabled
             visible: titlebar.animated_mark_visible
-            Layout.preferredWidth: mark_size
+            Layout.preferredWidth: animated_mark.pid_pill_active
+                ? animated_mark.pid_layout_width
+                : animated_mark.mark_size
             Layout.preferredHeight: mark_size
             Layout.alignment: Qt.AlignVCenter
             Layout.rightMargin: titlebar.animated_mark_visible ? 8 : 0
