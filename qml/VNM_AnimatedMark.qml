@@ -9,7 +9,7 @@ Item {
     property bool alt_click_enabled: false
     property int move_drag_threshold: 2
     property bool alt_reveal_forced: false
-    property bool pid_reveal_enabled: false
+    property bool pid_reveal_enabled: true
     // Reveal lifecycle: "" -> "forming" -> "elongating" -> "revealed"
     // -> "retracting" -> "".
     property string pid_phase: ""

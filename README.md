@@ -4,6 +4,11 @@
 
 Requires Qt 6.11.1 or newer.
 
+Clicking the Varinomics mark reveals the process ID by default. Set
+`pid_reveal_enabled: false` on a direct `VNM_AnimatedMark`, or set
+`mark_pid_reveal_enabled: false` on `VNM_ChromeTitleBar` or
+`VNM_ChromeFrameShell`, to opt out.
+
 `VNM_ChromeTitleBar` and `VNM_ChromeFrameShell` can opt into user-edited
 window titles with `title_editing_enabled: true`. Alt+left-click starts editing;
 Enter or moving focus away emits `title_edit_accepted(title)` so the owning

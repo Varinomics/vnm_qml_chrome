@@ -22,7 +22,7 @@ Rectangle {
     property real content_left_inset: snapped_left_resize_near_extent
     property real device_pixel_ratio: Screen.devicePixelRatio
     property bool animated_mark_visible: true
-    property bool mark_pid_reveal_enabled: false
+    property bool mark_pid_reveal_enabled: true
     property string activity_marker_text: ""
     property bool window_frame_top_visible: false
     property real window_frame_width: 0
