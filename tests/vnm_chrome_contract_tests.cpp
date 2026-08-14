@@ -662,6 +662,7 @@ Item {
         QVERIFY(has_property(mark, "hover_active"));
         QVERIFY(has_property(mark, "alt_reveal_active"));
         QVERIFY(has_property(mark, "pid_reveal_enabled"));
+        QCOMPARE(mark->property("pid_reveal_enabled").toBool(), true);
         QVERIFY(has_property(mark, "pid_phase"));
         QVERIFY(has_property(mark, "pid_layout_width"));
         QVERIFY(has_signal(mark, "move_requested()"));
@@ -775,6 +776,7 @@ Item {
         for (const char* property_name : titlebar_properties) {
             QVERIFY2(has_property(titlebar, property_name), property_name);
         }
+        QCOMPARE(titlebar->property("mark_pid_reveal_enabled").toBool(), true);
         QVERIFY(has_signal(titlebar, "move_requested()"));
         QVERIFY(has_signal(titlebar, "resize_requested(int)"));
         QVERIFY(has_signal(titlebar, "minimize_requested()"));
@@ -1226,16 +1228,26 @@ Item {
         QObject* titlebar = find_descendant(
             root.get(),
             QStringLiteral("chrome_frame_shell_titlebar"));
+        QObject* animated_mark = find_descendant(
+            root.get(),
+            QStringLiteral("vnm_animated_mark"));
         QVERIFY(shell    != nullptr);
         QVERIFY(titlebar != nullptr);
+        QVERIFY(animated_mark != nullptr);
 
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Shell Commands"));
         QCOMPARE(titlebar->property("title_editing_enabled").toBool(), true);
         QCOMPARE(titlebar->property("active").toBool(), false);
         QCOMPARE(titlebar->property("maximized").toBool(), true);
+        QCOMPARE(shell->property("mark_pid_reveal_enabled").toBool(), true);
+        QCOMPARE(titlebar->property("mark_pid_reveal_enabled").toBool(), true);
+        QCOMPARE(animated_mark->property("pid_reveal_enabled").toBool(), true);
         QCOMPARE(titlebar->property("activity_marker_text").toString(), QStringLiteral("!"));
         QVERIFY(shell->setProperty("title", QStringLiteral("Updated Shell")));
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Updated Shell"));
+        QVERIFY(shell->setProperty("mark_pid_reveal_enabled", false));
+        QCOMPARE(titlebar->property("mark_pid_reveal_enabled").toBool(), false);
+        QCOMPARE(animated_mark->property("pid_reveal_enabled").toBool(), false);
 
         QVERIFY(find_item(root.get(), QStringLiteral("shell_leading_action")) != nullptr);
         QVERIFY(find_item(root.get(), QStringLiteral("shell_trailing_action")) != nullptr);
@@ -1900,6 +1912,10 @@ Item {
             find_descendant(root.get(), QStringLiteral("vnm_animated_mark")));
         QVERIFY(mark != nullptr);
         QVERIFY(mark->isVisible());
+        QCOMPARE(titlebar->property("mark_pid_reveal_enabled").toBool(), true);
+        QCOMPARE(mark->property("pid_reveal_enabled").toBool(), true);
+        QVERIFY(titlebar->setProperty("mark_pid_reveal_enabled", false));
+        QCOMPARE(mark->property("pid_reveal_enabled").toBool(), false);
 
         QObject* custom_theme = find_descendant(root.get(), QStringLiteral("custom_theme"));
         QVERIFY(custom_theme != nullptr);
@@ -2435,7 +2451,6 @@ import VNM_Chrome
 VNM_AnimatedMark {
     objectName: "animated_mark"
     mark_size: 20
-    pid_reveal_enabled: true
 }
 )";
 
@@ -2444,6 +2459,7 @@ VNM_AnimatedMark {
         QVERIFY(root != nullptr);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
+        QCOMPARE(root->property("pid_reveal_enabled").toBool(), true);
         QCOMPARE(root->property("pid_phase").toString(), QString());
         QVERIFY(root->setProperty("hover_active", true));
         QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_reveal"));
@@ -2476,6 +2492,10 @@ VNM_AnimatedMark {
             root->property("pid_phase").toString().isEmpty(),
             5000);
         QVERIFY(!pill->property("visible").toBool());
+
+        QVERIFY(root->setProperty("pid_reveal_enabled", false));
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_reveal"));
+        QCOMPARE(root->property("pid_phase").toString(), QString());
     }
 
     void system_window_tracks_alt_modifier_state()
