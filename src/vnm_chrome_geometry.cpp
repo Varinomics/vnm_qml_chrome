@@ -60,6 +60,43 @@ bool rect_has_snapped_physical_edges(
         edge_is_snapped(logical_rect.bottom());
 }
 
+bool physical_extent_matches_logical(
+    qreal logical_extent,
+    qreal physical_extent,
+    qreal device_pixel_ratio)
+{
+    if (!std::isfinite(logical_extent) || !std::isfinite(physical_extent)) {
+        return false;
+    }
+    if (physical_extent <= 0.0) {
+        return false;
+    }
+
+    const qreal dpr = normalized_device_pixel_ratio(device_pixel_ratio);
+    const qreal implied_logical_extent = physical_extent / dpr;
+
+    return
+        std::abs(implied_logical_extent - logical_extent) <=
+        k_physical_extent_agreement_tolerance;
+}
+
+qreal physical_far_edge(
+    qreal logical_edge,
+    qreal physical_extent,
+    qreal device_pixel_ratio)
+{
+    if (!physical_extent_matches_logical(
+            logical_edge,
+            physical_extent,
+            device_pixel_ratio)) {
+        return snapped_logical_edge(logical_edge, device_pixel_ratio);
+    }
+
+    const qreal dpr = normalized_device_pixel_ratio(device_pixel_ratio);
+
+    return std::max<qreal>(0.0, physical_extent / dpr);
+}
+
 qreal resize_inward_extent(
     qreal frame_extent,
     qreal target_extent)
@@ -126,6 +163,28 @@ bool vnm_qml_chrome::Chrome_geometry::rect_has_snapped_physical_edges(
 {
     return vnm_qml_chrome::rect_has_snapped_physical_edges(
         logical_rect,
+        device_pixel_ratio);
+}
+
+bool vnm_qml_chrome::Chrome_geometry::physical_extent_matches_logical(
+    qreal logical_extent,
+    qreal physical_extent,
+    qreal device_pixel_ratio) const
+{
+    return vnm_qml_chrome::physical_extent_matches_logical(
+        logical_extent,
+        physical_extent,
+        device_pixel_ratio);
+}
+
+qreal vnm_qml_chrome::Chrome_geometry::physical_far_edge(
+    qreal logical_edge,
+    qreal physical_extent,
+    qreal device_pixel_ratio) const
+{
+    return vnm_qml_chrome::physical_far_edge(
+        logical_edge,
+        physical_extent,
         device_pixel_ratio);
 }
 

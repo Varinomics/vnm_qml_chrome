@@ -15,7 +15,14 @@ Item {
     property real frame_inner_edge: 1
     property color frame_inner_edge_color: "#2a313c"
     property real resize_target_extent: VNM_chrome_geometry.default_resize_target_extent
-    property real device_pixel_ratio: Screen.devicePixelRatio
+    // Screen.devicePixelRatio never re-notifies while a window stays on one
+    // QScreen, and a Windows scale change updates that screen in place, so a
+    // shell bound to it keeps the ratio of the previous scale for the lifetime
+    // of the window. The window ratio is the live one. The screen ratio still
+    // serves items that have no window yet.
+    readonly property real window_device_pixel_ratio:
+        Window.window ? Window.window.devicePixelRatio : Screen.devicePixelRatio
+    property real device_pixel_ratio: window_device_pixel_ratio
     property real render_target_physical_width: 0
     property real render_target_physical_height: 0
     property real titlebar_height: 32
@@ -54,15 +61,20 @@ Item {
         VNM_system_window.native_window_physical_size(
             Window.window,
             width,
-            height)
+            height,
+            device_pixel_ratio)
     readonly property real effective_render_target_physical_width:
-        positive_or_default(
-            render_target_physical_width,
-            detected_render_target_physical_size.width)
+        usable_physical_extent(
+            width,
+            positive_or_default(
+                render_target_physical_width,
+                detected_render_target_physical_size.width))
     readonly property real effective_render_target_physical_height:
-        positive_or_default(
-            render_target_physical_height,
-            detected_render_target_physical_size.height)
+        usable_physical_extent(
+            height,
+            positive_or_default(
+                render_target_physical_height,
+                detected_render_target_physical_size.height))
     readonly property real outer_right_far_edge:
         physical_far_edge(width, effective_render_target_physical_width)
     readonly property real outer_bottom_far_edge:
@@ -155,12 +167,25 @@ Item {
             : non_negative(default_value)
     }
 
+    // A physical extent sampled at a ratio other than the one in force cannot
+    // refine any edge, so the frame treats it as absent and lays out from the
+    // logical extent alone. Rejecting it here rather than per edge keeps every
+    // derived edge on one branch, which is what makes the frame degrade to a
+    // whole-pixel rounding difference instead of a rescaled interior.
+    function usable_physical_extent(logical_extent, physical_extent) {
+        return VNM_chrome_geometry.physical_extent_matches_logical(
+                logical_extent,
+                physical_extent,
+                device_pixel_ratio)
+            ? physical_extent
+            : 0
+    }
+
     function physical_far_edge(logical_edge, physical_extent) {
-        const dpr = VNM_chrome_geometry.normalized_device_pixel_ratio(
+        return VNM_chrome_geometry.physical_far_edge(
+            logical_edge,
+            physical_extent,
             device_pixel_ratio)
-        return physical_extent > 0
-            ? Math.max(0, physical_extent / dpr)
-            : snapped_edge(logical_edge)
     }
 
     function snapped_edge(value) {

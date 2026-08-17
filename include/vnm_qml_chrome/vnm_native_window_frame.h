@@ -76,6 +76,9 @@ signals:
     void resize_outward_margins_changed();
     void active_changed();
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void disconnect_window();
     void set_active(bool active);

@@ -32,10 +32,20 @@ public:
 
     Q_INVOKABLE bool start_system_move(QWindow* window) const;
     Q_INVOKABLE bool start_system_resize(QWindow* window, int edges) const;
+    /**
+     * @brief Return the native physical window size, when it is usable.
+     *
+     * The ratio is the one the caller is laying out at. Windows holds a
+     * window's logical size constant across a display scale change, so the
+     * logical arguments alone cannot tell a caller that the native size has
+     * moved underneath it. Passing the ratio both re-reads the native size
+     * when the scale changes and rejects a size belonging to another scale.
+     */
     Q_INVOKABLE QSize native_window_physical_size(
         QWindow* window,
         qreal    logical_width,
-        qreal    logical_height) const;
+        qreal    logical_height,
+        qreal    device_pixel_ratio) const;
 
 Q_SIGNALS:
     void alt_modifier_active_changed();

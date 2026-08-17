@@ -1,6 +1,8 @@
 #include "vnm_qml_chrome/vnm_native_window_frame.h"
 
+#include <QEvent>
 #include <QScreen>
+#include <QWindow>
 
 #ifdef Q_OS_WIN
 #include <QMouseEvent>
@@ -249,6 +251,11 @@ void VNM_NativeWindowFrame::set_window(QWindow* window)
 
     m_window = window;
     if (m_window) {
+        // A display scale change keeps a window's logical geometry and its
+        // screen, so none of the signals below report it. The frame is sized in
+        // physical pixels, so it has to be rebuilt anyway. Qt sends this event
+        // to the window whenever its ratio actually moves.
+        m_window->installEventFilter(this);
         m_window_connections.push_back(QObject::connect(
             m_window,
             &QWindow::xChanged,
@@ -401,8 +408,23 @@ bool VNM_NativeWindowFrame::active() const
     return m_active;
 }
 
+bool VNM_NativeWindowFrame::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event
+        && event->type() == QEvent::DevicePixelRatioChange
+        && watched == m_window) {
+        update_native_frame();
+    }
+
+    return QObject::eventFilter(watched, event);
+}
+
 void VNM_NativeWindowFrame::disconnect_window()
 {
+    if (m_window) {
+        m_window->removeEventFilter(this);
+    }
+
     for (const QMetaObject::Connection& connection : m_window_connections) {
         QObject::disconnect(connection);
     }

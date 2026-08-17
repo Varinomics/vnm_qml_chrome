@@ -38,6 +38,43 @@ bool rect_has_snapped_physical_edges(
     qreal         device_pixel_ratio);
 
 /**
+ * @brief Largest logical disagreement a usable physical extent may show.
+ *
+ * A physical extent is the logical extent rounded to whole device pixels, so a
+ * matching pair can only differ by half a device pixel. One logical pixel of
+ * headroom accepts every consistent pair and rejects a pair sampled at two
+ * different ratios.
+ */
+inline constexpr qreal k_physical_extent_agreement_tolerance = 1.0;
+
+/**
+ * @brief Return whether a physical extent describes the given logical extent.
+ *
+ * A display scale change moves the device-pixel ratio and every physical size
+ * reported by the system together. Code that samples the two independently can
+ * hold one from before the change and one from after, and their quotient is
+ * then neither extent. This predicate rejects such a pair.
+ */
+bool physical_extent_matches_logical(
+    qreal logical_extent,
+    qreal physical_extent,
+    qreal device_pixel_ratio);
+
+/**
+ * @brief Return a far frame edge, refined by a physical extent when usable.
+ *
+ * The logical extent owns the layout. A physical extent only refines the edge
+ * onto a whole device pixel, so it is honoured only while it still describes
+ * the logical extent. A physical extent left over from another ratio refines
+ * nothing and is discarded, which keeps a stale ratio from rescaling the frame
+ * instead of nudging its edge.
+ */
+qreal physical_far_edge(
+    qreal logical_edge,
+    qreal physical_extent,
+    qreal device_pixel_ratio);
+
+/**
  * @brief Return the content-side share of a frame-aware resize target.
  *
  * The complete frame participates in resizing. Any shortfall from the target
@@ -77,6 +114,16 @@ public:
     Q_INVOKABLE bool rect_has_snapped_physical_edges(
         const QRectF& logical_rect,
         qreal         device_pixel_ratio) const;
+
+    Q_INVOKABLE bool physical_extent_matches_logical(
+        qreal logical_extent,
+        qreal physical_extent,
+        qreal device_pixel_ratio) const;
+
+    Q_INVOKABLE qreal physical_far_edge(
+        qreal logical_edge,
+        qreal physical_extent,
+        qreal device_pixel_ratio) const;
 
     Q_INVOKABLE qreal resize_inward_extent(
         qreal frame_extent,

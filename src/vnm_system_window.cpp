@@ -1,5 +1,7 @@
 #include "vnm_qml_chrome/vnm_system_window.h"
 
+#include "vnm_qml_chrome/vnm_chrome_geometry.h"
+
 #include <QCoreApplication>
 #include <QEvent>
 #include <QGuiApplication>
@@ -196,14 +198,23 @@ bool vnm_qml_chrome::System_window::start_system_resize(
 QSize vnm_qml_chrome::System_window::native_window_physical_size(
     QWindow* window,
     qreal    logical_width,
-    qreal    logical_height) const
+    qreal    logical_height,
+    qreal    device_pixel_ratio) const
 {
 #ifdef Q_OS_WIN
     if (window
         && nearly_equal(logical_width,  window->width())
         && nearly_equal(logical_height, window->height())) {
         const QSize native_size = dwm_window_physical_size(window_hwnd(window));
-        if (native_size.isValid()) {
+        if (native_size.isValid()
+            && physical_extent_matches_logical(
+                logical_width,
+                native_size.width(),
+                device_pixel_ratio)
+            && physical_extent_matches_logical(
+                logical_height,
+                native_size.height(),
+                device_pixel_ratio)) {
             return native_size;
         }
     }
@@ -213,5 +224,6 @@ QSize vnm_qml_chrome::System_window::native_window_physical_size(
 
     Q_UNUSED(logical_width);
     Q_UNUSED(logical_height);
+    Q_UNUSED(device_pixel_ratio);
     return QSize();
 }

@@ -20,7 +20,13 @@ Rectangle {
     // Visual content may align to a client surface independently of the wider
     // resize hit band. The default retains the resize-safe shared-chrome inset.
     property real content_left_inset: snapped_left_resize_near_extent
-    property real device_pixel_ratio: Screen.devicePixelRatio
+    // The window ratio is the live one: Screen.devicePixelRatio never
+    // re-notifies while a window stays on one QScreen, and a Windows scale
+    // change updates that screen in place. The screen ratio still serves
+    // titlebars that have no window yet.
+    readonly property real window_device_pixel_ratio:
+        Window.window ? Window.window.devicePixelRatio : Screen.devicePixelRatio
+    property real device_pixel_ratio: window_device_pixel_ratio
     property bool animated_mark_visible: true
     property bool mark_pid_reveal_enabled: true
     property string activity_marker_text: ""

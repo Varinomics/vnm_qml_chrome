@@ -196,6 +196,43 @@ private slots:
             "Custom-frame terminal content must snap off the half physical pixel.");
     }
 
+    void geometry_helpers_reject_a_physical_extent_from_another_ratio()
+    {
+        using vnm_qml_chrome::physical_extent_matches_logical;
+        using vnm_qml_chrome::physical_far_edge;
+        using vnm_qml_chrome::snapped_logical_edge;
+
+        constexpr qreal dpr = 1.25;
+
+        // A native size is the logical size rounded to whole device pixels, so
+        // a matching pair may disagree by up to half a device pixel.
+        QVERIFY(physical_extent_matches_logical(755.0, 944.0, dpr));
+        QVERIFY(physical_extent_matches_logical(450.0, 562.0, dpr));
+        QVERIFY(physical_extent_matches_logical(390.0, 488.0, dpr));
+
+        // A physical extent measured at ratio 1.0 against a held ratio of 1.25,
+        // which is what a Windows scale change leaves behind.
+        QVERIFY(!physical_extent_matches_logical(755.0, 755.0, dpr));
+        QVERIFY(!physical_extent_matches_logical(390.0, 390.0, dpr));
+
+        // The reverse transition, where the held ratio is the lower one.
+        QVERIFY(!physical_extent_matches_logical(755.0, 944.0, 1.0));
+
+        QVERIFY(!physical_extent_matches_logical(755.0,   0.0, dpr));
+        QVERIFY(!physical_extent_matches_logical(755.0,  -1.0, dpr));
+        QVERIFY(!physical_extent_matches_logical(
+            755.0,
+            std::numeric_limits<qreal>::quiet_NaN(),
+            dpr));
+
+        // A rejected extent leaves the edge on the logical extent rather than
+        // rescaling it: 755 / 1.25 would be 604.
+        QVERIFY(nearly_equal(
+            physical_far_edge(755.0, 755.0, dpr),
+            snapped_logical_edge(755.0, dpr)));
+        QVERIFY(nearly_equal(physical_far_edge(755.0, 944.0, dpr), 755.2));
+    }
+
     void geometry_helpers_distribute_resize_target_around_frame()
     {
         using vnm_qml_chrome::resize_inward_extent;
@@ -1662,6 +1699,124 @@ Item {
             QVERIFY(rect_nearly_equal(item_rect(*inner_bottom), c.expected_inner_bottom));
             QVERIFY(rect_nearly_equal(item_rect(*inner_right),  c.expected_inner_right));
         }
+    }
+
+    void frame_shell_rejects_physical_extent_from_a_stale_device_pixel_ratio()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        // A display scale change moves the device-pixel ratio and the reported
+        // physical window size together. Whenever a shell samples the two at
+        // different ratios the quotient is meaningless, so the physical extent
+        // must be discarded rather than allowed to rescale the interior. Here
+        // the physical size follows a ratio of 1.0 while the shell still holds
+        // the previous 1.25, which is the shape of a Windows scaling change.
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+Item {
+    width: 755
+    height: 390
+
+    VNM_ChromeFrameShell {
+        objectName: "desynced_shell"
+        anchors.fill: parent
+        titlebar_height: 32
+        frame_outer_edge: 1
+        frame_gap: 3
+        frame_inner_edge: 1
+        device_pixel_ratio: 1.25
+        render_target_physical_width: 755
+        render_target_physical_height: 390
+    }
+
+    VNM_ChromeFrameShell {
+        objectName: "logical_shell"
+        anchors.fill: parent
+        titlebar_height: 32
+        frame_outer_edge: 1
+        frame_gap: 3
+        frame_inner_edge: 1
+        device_pixel_ratio: 1.25
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine,
+            qml_source,
+            "qrc:/tests/frame_shell_stale_device_pixel_ratio_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        auto* desynced_shell = find_item(root.get(), QStringLiteral("desynced_shell"));
+        auto* logical_shell  = find_item(root.get(), QStringLiteral("logical_shell"));
+        QVERIFY(desynced_shell != nullptr);
+        QVERIFY(logical_shell  != nullptr);
+
+        const QRectF desynced_interior =
+            desynced_shell->property("content_interior_rect").toRectF();
+        const QRectF logical_interior =
+            logical_shell->property("content_interior_rect").toRectF();
+
+        // Guard the comparison itself: two shells that both collapsed would
+        // otherwise satisfy the equality below.
+        QVERIFY(logical_interior.width()  > 700.0);
+        QVERIFY(logical_interior.height() > 330.0);
+
+        QVERIFY(rect_nearly_equal(desynced_interior, logical_interior));
+
+        auto* desynced_content = find_item(
+            desynced_shell,
+            QStringLiteral("chrome_frame_shell_content"));
+        QVERIFY(desynced_content != nullptr);
+        QVERIFY(rect_nearly_equal(item_rect(*desynced_content), logical_interior));
+    }
+
+    void frame_shell_reads_device_pixel_ratio_from_its_window()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        // The window ratio is the only live source: the Screen attached property
+        // never re-notifies while a window stays on the same QScreen, so a shell
+        // bound to it keeps the ratio of a previous display scale forever.
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+Window {
+    objectName: "host_window"
+    width: 480
+    height: 320
+
+    VNM_ChromeFrameShell {
+        objectName: "frame_shell"
+        anchors.fill: parent
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine,
+            qml_source,
+            "qrc:/tests/frame_shell_window_device_pixel_ratio_contract.qml");
+        QVERIFY(root != nullptr);
+
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        QVERIFY(window != nullptr);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        auto* shell = find_item(root.get(), QStringLiteral("frame_shell"));
+        QVERIFY(shell != nullptr);
+
+        const qreal shell_ratio = shell->property("device_pixel_ratio").toReal();
+        QVERIFY(shell_ratio > 0.0);
+        QVERIFY(nearly_equal(shell_ratio, window->effectiveDevicePixelRatio()));
     }
 
     void frame_shell_terminal_chrome_renders_outer_edge_pixels()
