@@ -4,10 +4,22 @@
 
 Requires Qt 6.11.1 or newer.
 
-Clicking the Varinomics mark reveals the process ID by default. Set
-`pid_reveal_enabled: false` on a direct `VNM_AnimatedMark`, or set
-`mark_pid_reveal_enabled: false` on `VNM_ChromeTitleBar` or
-`VNM_ChromeFrameShell`, to opt out.
+A plain left click on the Varinomics mark toggles an always-on-top eye.
+Ctrl+left-click reveals the process ID; a second Ctrl+left-click retracts it.
+Set `stay_on_top_enabled: false` or
+`pid_reveal_enabled: false` on a direct `VNM_AnimatedMark`; the corresponding
+`VNM_ChromeTitleBar` / `VNM_ChromeFrameShell` properties are
+`mark_stay_on_top_enabled` and `mark_pid_reveal_enabled`.
+
+`VNM_ChromeTitleBar` and `VNM_ChromeFrameShell` apply the topmost window hint
+automatically. A direct `VNM_AnimatedMark` emits
+`stay_on_top_change_requested(active)` so its owner can apply the request. The
+eye is the bundled `vnm_mark_eye.svg` (Font Awesome Free, see the file's
+attribution comment), so no font lookup is involved. On Windows, eye mode also
+rejects unsolicited
+foreground-window requests while the application is active; explicit user
+switching remains possible. Other platforms receive the always-on-top hint,
+subject to their window manager.
 
 `VNM_ChromeTitleBar` and `VNM_ChromeFrameShell` can opt into user-edited
 window titles with `title_editing_enabled: true`. Alt+left-click starts editing;

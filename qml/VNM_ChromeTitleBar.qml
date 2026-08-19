@@ -29,6 +29,10 @@ Rectangle {
     property real device_pixel_ratio: window_device_pixel_ratio
     property bool animated_mark_visible: true
     property bool mark_pid_reveal_enabled: true
+    property bool mark_stay_on_top_enabled: true
+    readonly property bool window_stays_on_top: Window.window
+        ? (Window.window.flags & Qt.WindowStaysOnTopHint) !== 0
+        : false
     property string activity_marker_text: ""
     property bool window_frame_top_visible: false
     property real window_frame_width: 0
@@ -209,7 +213,9 @@ Rectangle {
             && titlebar.window_frame_top_width > 0
             && titlebar.theme.window_frame_border.a > 0
         enabled: false
-        z: 0
+        // The outer outline must win over full-height hover/pressed button
+        // backgrounds. Resize areas remain above it at z 4/5.
+        z: 3
     }
 
     MouseArea {
@@ -275,6 +281,8 @@ Rectangle {
             move_drag_threshold: titlebar.move_drag_threshold
             alt_reveal_forced: title_editor_frame.visible
             pid_reveal_enabled: titlebar.mark_pid_reveal_enabled
+            stay_on_top_enabled: titlebar.mark_stay_on_top_enabled
+            stay_on_top_active: titlebar.window_stays_on_top
             visible: titlebar.animated_mark_visible
             Layout.preferredWidth: animated_mark.pid_pill_active
                 ? animated_mark.pid_layout_width
@@ -285,6 +293,11 @@ Rectangle {
             onMove_requested: titlebar.move_requested()
             onMaximize_toggle_requested: titlebar.maximize_toggle_requested()
             onAlt_click_requested: titlebar.begin_title_edit()
+            onStay_on_top_change_requested: (requested_active) => {
+                VNM_system_window.set_window_stays_on_top(
+                    titlebar.Window.window,
+                    requested_active)
+            }
         }
 
         Label {

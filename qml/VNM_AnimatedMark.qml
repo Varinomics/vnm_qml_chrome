@@ -10,6 +10,8 @@ Item {
     property int move_drag_threshold: 2
     property bool alt_reveal_forced: false
     property bool pid_reveal_enabled: true
+    property bool stay_on_top_enabled: true
+    property bool stay_on_top_active: false
     // Reveal lifecycle: "" -> "forming" -> "elongating" -> "revealed"
     // -> "retracting" -> "".
     property string pid_phase: ""
@@ -29,19 +31,25 @@ Item {
             + pid_text_right_margin)
     readonly property bool alt_hover_active:
         icon_hover.hovered && VNM_system_window.alt_modifier_active
-    // Single pose arbiter. The pill lifecycle dominates; the alt pose beats
-    // the hover circle; the hover circle additionally requires the alt pose
-    // (including its un-rotation tail) to be fully gone.
+    // Single pose arbiter. The pill lifecycle dominates. A latched eye remains
+    // visible until another plain left click, including across Alt hover/title
+    // editing. The hover circle additionally requires the Alt pose (including
+    // its un-rotation tail) to be fully gone.
     readonly property string pose: {
         if (pid_phase !== "") {
             return "pill"
+        }
+        if (stay_on_top_active) {
+            return "stay_on_top"
         }
         if (alt_reveal_forced || alt_hover_active) {
             return "alt"
         }
         if (icon_hover.hovered
             && Math.abs(icon_rotor.rotation) <= 0.01
-            && (!icon_press_area.pressed || pid_reveal_enabled)) {
+            && (!icon_press_area.pressed
+                || pid_reveal_enabled
+                || stay_on_top_enabled)) {
             return "hover"
         }
         return "idle"
@@ -57,6 +65,7 @@ Item {
     signal move_requested()
     signal maximize_toggle_requested()
     signal alt_click_requested()
+    signal stay_on_top_change_requested(bool active)
 
     function maybe_start_system_move(mouse) {
         if (!move_enabled
@@ -75,9 +84,106 @@ Item {
         }
 
         icon_press_area.system_move_started = true
+        icon_press_area.stay_on_top_click_pending = false
         mark.cancel_pid_reveal()
         move_requested()
         mouse.accepted = true
+    }
+
+    function handle_primary_press(mouse) {
+        icon_press_area.stay_on_top_click_pending = false
+
+        if (mark.pid_pill_active
+            && !(mouse.modifiers & Qt.AltModifier)) {
+            // Ctrl+click toggles the revealed pill back to the bare mark.
+            if (mouse.button === Qt.LeftButton
+                && (mouse.modifiers & Qt.ControlModifier)) {
+                mark.request_pid_retract()
+            }
+            mouse.accepted = true
+            return
+        }
+
+        if (mark.pid_pill_active) {
+            // Alt+click on the revealed pill: retract first, then let the
+            // normal Alt handling below run.
+            mark.request_pid_retract()
+        }
+
+        if (mark.alt_click_enabled
+            && mouse.button === Qt.LeftButton
+            && (mouse.modifiers & Qt.AltModifier)) {
+            mark.alt_click_requested()
+            mouse.accepted = true
+            return
+        }
+
+        if (mouse.modifiers & Qt.AltModifier) {
+            // Alt is reserved for the mark's own Alt behavior. When that
+            // is disabled, swallow the press so it cannot fall through
+            // to the title bar and start a move drag.
+            mouse.accepted = true
+            return
+        }
+
+        if (mouse.button !== Qt.LeftButton) {
+            return
+        }
+
+        icon_press_area.system_move_press_x = mouse.x
+        icon_press_area.system_move_press_y = mouse.y
+        icon_press_area.system_move_started = false
+
+        if (mouse.modifiers & Qt.ControlModifier) {
+            // Keep the old press-driven reveal timing, but reserve it for
+            // Ctrl+click. A subsequent move drag cancels the forming pill.
+            mark.request_pid_reveal()
+        }
+        else if (mouse.modifiers === Qt.NoModifier) {
+            // Toggle on release so moving the window from the mark does not
+            // accidentally change its topmost state.
+            icon_press_area.stay_on_top_click_pending =
+                mark.stay_on_top_enabled
+        }
+
+        mouse.accepted = true
+    }
+
+    function handle_primary_release(mouse) {
+        const release_inside = mouse.x >= 0
+            && mouse.x < icon_press_area.width
+            && mouse.y >= 0
+            && mouse.y < icon_press_area.height
+        const toggle_stay_on_top =
+            icon_press_area.stay_on_top_click_pending
+            && !icon_press_area.system_move_started
+            && release_inside
+            && mouse.button === Qt.LeftButton
+            && mouse.modifiers === Qt.NoModifier
+
+        icon_press_area.system_move_started = false
+        icon_press_area.stay_on_top_click_pending = false
+
+        if (toggle_stay_on_top) {
+            mark.stay_on_top_change_requested(!mark.stay_on_top_active)
+            mouse.accepted = true
+        }
+    }
+
+    function cancel_primary_press() {
+        icon_press_area.system_move_started = false
+        icon_press_area.stay_on_top_click_pending = false
+        mark.cancel_pid_reveal()
+    }
+
+    function handle_pill_press(mouse) {
+        if (mouse.button === Qt.LeftButton
+            && (mouse.modifiers & Qt.ControlModifier)) {
+            mark.request_pid_retract()
+            mouse.accepted = true
+            return
+        }
+        mouse.accepted = false
     }
 
     function circle_settled() {
@@ -154,7 +260,9 @@ Item {
 
     width: mark_size
     height: mark_size
-    state: (hover_active || pid_phase !== "") ? "normal_hover" : ""
+    state: (hover_active || stay_on_top_active || pid_phase !== "")
+        ? "normal_hover"
+        : ""
 
     HoverHandler {
         id: icon_hover
@@ -199,7 +307,8 @@ Item {
             objectName: "vnm_mark_rotor"
 
             readonly property bool alt_pose_active:
-                (mark.alt_reveal_forced || mark.alt_hover_active)
+                !mark.stay_on_top_active
+                && (mark.alt_reveal_forced || mark.alt_hover_active)
                 && mark.pid_phase === ""
 
             x: alt_pose_active ? -mark.mark_size * 0.245998 : 0
@@ -296,67 +405,58 @@ Item {
 
     MouseArea {
         id: icon_press_area
+        objectName: "vnm_mark_press_area"
 
         property real system_move_press_x: 0
         property real system_move_press_y: 0
         property bool system_move_started: false
+        property bool stay_on_top_click_pending: false
 
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
 
-        onPressed: (mouse) => {
-            if (mark.pid_pill_active
-                && !(mouse.modifiers & Qt.AltModifier)) {
-                mouse.accepted = true
-                return
-            }
-
-            if (mark.pid_pill_active) {
-                // Alt+click on the revealed pill: retract first, then let the
-                // normal Alt handling below run.
-                mark.request_pid_retract()
-            }
-
-            if (mark.alt_click_enabled &&
-                mouse.button === Qt.LeftButton &&
-                (mouse.modifiers & Qt.AltModifier)) {
-                mark.alt_click_requested()
-                mouse.accepted = true
-                return
-            }
-
-            if (mouse.modifiers & Qt.AltModifier) {
-                // Alt is reserved for the mark's own Alt behavior. When that
-                // is disabled, swallow the press so it cannot fall through
-                // to the title bar and start a move drag.
-                mouse.accepted = true
-                return
-            }
-
-            if (mouse.button === Qt.LeftButton) {
-                // Start the reveal on press: the forced hover state keeps the
-                // circle intact instead of letting it un-form while pressed.
-                mark.request_pid_reveal()
-                system_move_press_x = mouse.x
-                system_move_press_y = mouse.y
-                system_move_started = false
-                mouse.accepted = true
-            }
-        }
+        onPressed: (mouse) => mark.handle_primary_press(mouse)
 
         onPositionChanged: (mouse) => {
             mark.maybe_start_system_move(mouse)
         }
 
-        onReleased: system_move_started = false
-        onCanceled: system_move_started = false
+        onReleased: (mouse) => mark.handle_primary_release(mouse)
+        onCanceled: mark.cancel_primary_press()
 
         onDoubleClicked: (mouse) => {
             if (mark.move_enabled
                 && !mark.pid_reveal_enabled
+                && !mark.stay_on_top_enabled
                 && mouse.button === Qt.LeftButton) {
                 mark.maximize_toggle_requested()
                 mouse.accepted = true
+            }
+        }
+    }
+
+    Image {
+        id: stay_on_top_eye
+        objectName: "vnm_mark_stay_on_top_eye"
+
+        width: mark.mark_size * 0.8
+        height: width
+        anchors.centerIn: parent
+        z: 1
+        source: "vnm_mark_eye.svg"
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        // Rasterize the SVG at twice the rendered size; scaling the 640px
+        // natural render down to mark size aliases badly.
+        sourceSize.width: width * 2
+        sourceSize.height: height * 2
+        opacity: mark.stay_on_top_active && mark.pid_phase === "" ? 1 : 0
+        enabled: false
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 180
+                easing.type: Easing.InOutQuad
             }
         }
     }
@@ -410,6 +510,17 @@ Item {
                 mark.request_pid_retract()
                 event.accepted = true
             }
+        }
+
+        // Above the PID text so Ctrl+click retracts the pill from anywhere on
+        // it. Other presses are refused and fall through to the text input,
+        // keeping click-and-drag selection intact.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            propagateComposedEvents: true
+            cursorShape: Qt.IBeamCursor
+            onPressed: (mouse) => mark.handle_pill_press(mouse)
         }
     }
 

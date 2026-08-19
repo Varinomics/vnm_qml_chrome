@@ -34,6 +34,8 @@ Item {
     property alias maximized: titlebar.maximized
     property alias activity_marker_text: titlebar.activity_marker_text
     property alias mark_pid_reveal_enabled: titlebar.mark_pid_reveal_enabled
+    property alias mark_stay_on_top_enabled: titlebar.mark_stay_on_top_enabled
+    readonly property bool window_stays_on_top: titlebar.window_stays_on_top
     property alias titlebar_content_left_inset: titlebar.content_left_inset
     property alias leading_action_component: titlebar.leading_action_component
     property alias trailing_action_component: titlebar.trailing_action_component

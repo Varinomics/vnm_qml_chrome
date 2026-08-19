@@ -26,12 +26,23 @@ class System_window : public QObject
 
 public:
     explicit System_window(QObject* parent = nullptr);
+    ~System_window() override;
 
     qint64 process_id() const;
     bool alt_modifier_active() const;
 
     Q_INVOKABLE bool start_system_move(QWindow* window) const;
     Q_INVOKABLE bool start_system_resize(QWindow* window, int edges) const;
+    /**
+     * @brief Set or clear the platform's always-on-top window hint.
+     *
+     * On Windows, an enabled topmost window also guards the foreground process
+     * against unsolicited SetForegroundWindow calls. Explicit user switching
+     * remains possible and automatically releases that operating-system lock.
+     */
+    Q_INVOKABLE bool set_window_stays_on_top(
+        QWindow* window,
+        bool     enabled);
     /**
      * @brief Return the native physical window size, when it is usable.
      *
