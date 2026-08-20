@@ -5,9 +5,11 @@
 #include <QCoreApplication>
 #include <QEvent>
 #include <QGuiApplication>
+#include <QHash>
 #include <QKeyEvent>
-#include <QList>
+#include <QMetaObject>
 #include <QPointer>
+#include <QSet>
 #include <QSize>
 #include <QWindow>
 
@@ -88,93 +90,368 @@ bool current_process_owns_foreground_window()
     return foreground_process_id == GetCurrentProcessId();
 }
 
-int& focus_guard_owner_count()
+class Foreground_lock_service : public QObject
 {
-    static int count = 0;
-    return count;
-}
+public:
+    explicit Foreground_lock_service(QGuiApplication* application)
+    :
+        QObject(application),
+        m_application(application)
+    {
+        m_alt_pressed = QGuiApplication::queryKeyboardModifiers()
+            .testFlag(Qt::AltModifier);
+        application->installEventFilter(this);
+        m_application_state_changed = QObject::connect(
+            application,
+            &QGuiApplication::applicationStateChanged,
+            this,
+            [this](Qt::ApplicationState) {
+                // Alt+Tab delivers the release to the newly active process.
+                // Resync when this process returns so a stale press cannot
+                // suppress every later relock.
+                m_alt_pressed = QGuiApplication::queryKeyboardModifiers()
+                    .testFlag(Qt::AltModifier);
+                handle_automatic_native_unlock();
+            });
+        m_focus_window_changed = QObject::connect(
+            application,
+            &QGuiApplication::focusWindowChanged,
+            this,
+            [this](QWindow*) {
+                handle_automatic_native_unlock();
+            });
+    }
 
-QList<QPointer<QWindow>>& focus_guard_windows()
-{
-    // LockSetForegroundWindow is process-global, while QML singleton instances
-    // are engine-local. Keep one process-wide set so one engine cannot unlock
-    // the guard while another still owns a pinned window.
-    static QList<QPointer<QWindow>> windows;
-    return windows;
-}
+    void associate_direct_target(QWindow* window)
+    {
+        if (!window || m_direct_targets.contains(window)) {
+            refresh_native_lock();
+            return;
+        }
 
-void remove_focus_guard_window(const QObject* object)
-{
-    auto& windows = focus_guard_windows();
-    for (qsizetype index = windows.size(); index > 0; --index) {
-        const QPointer<QWindow>& window = windows[index - 1];
-        if (!window || window.data() == object) {
-            windows.removeAt(index - 1);
+        m_direct_targets.insert(window);
+        add_target_reference(window);
+        refresh_native_lock();
+    }
+
+    void associate_owner(QObject* owner, QWindow* window)
+    {
+        if (!owner) {
+            return;
+        }
+
+        auto owner_it = m_owner_associations.find(owner);
+        if (owner_it != m_owner_associations.end()
+            && owner_it->window == window)
+        {
+            refresh_native_lock();
+            return;
+        }
+
+        if (owner_it == m_owner_associations.end()) {
+            if (!window) {
+                return;
+            }
+
+            Owner_association association;
+            association.window = window;
+            association.owner_destroyed = QObject::connect(
+                owner,
+                &QObject::destroyed,
+                this,
+                &Foreground_lock_service::remove_owner);
+            m_owner_associations.insert(owner, association);
+            add_target_reference(window);
+        }
+        else {
+            QWindow* previous_window = owner_it->window;
+            if (!window) {
+                const QMetaObject::Connection owner_destroyed =
+                    owner_it->owner_destroyed;
+                m_owner_associations.erase(owner_it);
+                QObject::disconnect(owner_destroyed);
+            }
+            else {
+                owner_it->window = window;
+                add_target_reference(window);
+            }
+
+            release_target_reference(previous_window);
+        }
+
+        refresh_native_lock();
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        Q_UNUSED(watched);
+
+        if (event->type() == QEvent::KeyPress
+            || event->type() == QEvent::KeyRelease)
+        {
+            const auto* key_event = static_cast<const QKeyEvent*>(event);
+            if (key_event->key() == Qt::Key_Alt) {
+                m_alt_pressed = event->type() == QEvent::KeyPress;
+                if (m_alt_pressed) {
+                    // Windows automatically releases the foreground lock as
+                    // soon as the user presses Alt.
+                    m_native_lock_owned = false;
+                }
+                else {
+                    refresh_native_lock();
+                }
+            }
+        }
+
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    struct Owner_association
+    {
+        QWindow*                window = nullptr;
+        QMetaObject::Connection owner_destroyed;
+    };
+
+    struct Target_association
+    {
+        qsizetype               reference_count = 0;
+        QMetaObject::Connection flags_changed;
+        QMetaObject::Connection visibility_changed;
+        QMetaObject::Connection window_state_changed;
+        QMetaObject::Connection active_changed;
+        QMetaObject::Connection destroyed;
+    };
+
+    void add_target_reference(QWindow* window)
+    {
+        auto target_it = m_targets.find(window);
+        if (target_it != m_targets.end()) {
+            ++target_it->reference_count;
+            return;
+        }
+
+        target_it = m_targets.insert(window, Target_association{});
+        target_it->reference_count = 1;
+        target_it->flags_changed = QObject::connect(
+            window,
+            &QWindow::flagsChanged,
+            this,
+            [this](Qt::WindowFlags) {
+                refresh_native_lock();
+            });
+        target_it->visibility_changed = QObject::connect(
+            window,
+            &QWindow::visibilityChanged,
+            this,
+            [this](QWindow::Visibility) {
+                refresh_native_lock();
+            });
+        target_it->window_state_changed = QObject::connect(
+            window,
+            &QWindow::windowStateChanged,
+            this,
+            [this](Qt::WindowState) {
+                refresh_native_lock();
+            });
+        target_it->active_changed = QObject::connect(
+            window,
+            &QWindow::activeChanged,
+            this,
+            [this]() {
+                handle_automatic_native_unlock();
+            });
+        target_it->destroyed = QObject::connect(
+            window,
+            &QObject::destroyed,
+            this,
+            &Foreground_lock_service::remove_target);
+    }
+
+    void release_target_reference(QWindow* window)
+    {
+        auto target_it = m_targets.find(window);
+        if (target_it == m_targets.end()) {
+            return;
+        }
+
+        --target_it->reference_count;
+        if (target_it->reference_count > 0) {
+            return;
+        }
+
+        const Target_association association = target_it.value();
+        m_targets.erase(target_it);
+        disconnect_target(association);
+    }
+
+    void remove_owner(QObject* owner)
+    {
+        auto owner_it = m_owner_associations.find(owner);
+        if (owner_it == m_owner_associations.end()) {
+            return;
+        }
+
+        const Owner_association association = owner_it.value();
+        m_owner_associations.erase(owner_it);
+        QObject::disconnect(association.owner_destroyed);
+        release_target_reference(association.window);
+        // The owner may also be a directly registered target. Its target-side
+        // destroyed callback can run later in this same signal delivery, so do
+        // not inspect the target table until every destruction role is gone.
+        schedule_native_lock_refresh();
+    }
+
+    void remove_target(QObject* object)
+    {
+        auto* window = static_cast<QWindow*>(object);
+        m_direct_targets.remove(window);
+
+        for (auto owner_it = m_owner_associations.begin();
+             owner_it != m_owner_associations.end();)
+        {
+            if (owner_it->window != window) {
+                ++owner_it;
+                continue;
+            }
+
+            const QMetaObject::Connection owner_destroyed =
+                owner_it->owner_destroyed;
+            owner_it = m_owner_associations.erase(owner_it);
+            QObject::disconnect(owner_destroyed);
+        }
+
+        auto target_it = m_targets.find(window);
+        if (target_it != m_targets.end()) {
+            const Target_association association = target_it.value();
+            m_targets.erase(target_it);
+            disconnect_target(association);
+        }
+
+        refresh_native_lock();
+    }
+
+    static void disconnect_target(const Target_association& association)
+    {
+        QObject::disconnect(association.flags_changed);
+        QObject::disconnect(association.visibility_changed);
+        QObject::disconnect(association.window_state_changed);
+        QObject::disconnect(association.active_changed);
+        QObject::disconnect(association.destroyed);
+    }
+
+    void handle_automatic_native_unlock()
+    {
+        // Windows automatically enables foreground changes when the user
+        // changes the foreground window. The API has no query for that state,
+        // so these documented release events are authoritative.
+        m_native_lock_owned = false;
+        schedule_native_lock_refresh();
+    }
+
+    void schedule_native_lock_refresh()
+    {
+        if (m_refresh_pending) {
+            return;
+        }
+
+        m_refresh_pending = true;
+        QMetaObject::invokeMethod(
+            this,
+            [this]() {
+                m_refresh_pending = false;
+                refresh_native_lock();
+            },
+            Qt::QueuedConnection);
+    }
+
+    void refresh_native_lock()
+    {
+        const bool application_active =
+            m_application->applicationState() == Qt::ApplicationActive;
+        const bool process_is_foreground =
+            current_process_owns_foreground_window();
+
+        if (!application_active || !process_is_foreground || m_alt_pressed) {
+            // Losing the foreground or pressing Alt are both documented
+            // automatic-release paths. Never issue an unlock for them.
+            m_native_lock_owned = false;
+            return;
+        }
+
+        if (has_eligible_target()) {
+            if (!m_native_lock_owned
+                && LockSetForegroundWindow(LSFW_LOCK) != FALSE)
+            {
+                m_native_lock_owned = true;
+            }
+            return;
+        }
+
+        if (!m_native_lock_owned) {
+            return;
+        }
+
+        if (LockSetForegroundWindow(LSFW_UNLOCK) != FALSE) {
+            m_native_lock_owned = false;
+        }
+        else if (!current_process_owns_foreground_window()) {
+            // Foreground ownership raced the unlock call. Windows released the
+            // lock as part of that foreground transition.
+            m_native_lock_owned = false;
         }
     }
-}
 
-void set_focus_guard_window(QWindow* window, bool enabled)
-{
-    remove_focus_guard_window(window);
-    if (window && enabled) {
-        focus_guard_windows().push_back(QPointer<QWindow>(window));
-    }
-}
-
-bool focus_guard_window_event_is_relevant(const QObject* object)
-{
-    for (const QPointer<QWindow>& window : focus_guard_windows()) {
-        if (!window || window.data() == object) {
-            return true;
+    bool has_eligible_target() const
+    {
+        for (auto it = m_targets.cbegin(); it != m_targets.cend(); ++it) {
+            const QWindow* window = it.key();
+            if (window->flags().testFlag(Qt::WindowStaysOnTopHint) &&
+                window->isVisible()                                    &&
+                window->visibility() != QWindow::Minimized              &&
+                !window->windowStates().testFlag(Qt::WindowMinimized))
+            {
+                return true;
+            }
         }
+
+        return false;
     }
-    return false;
+
+    QGuiApplication*                       m_application = nullptr;
+    // Direct calls live with their target. Titlebar associations live with a
+    // separate owner and may be replaced; the namespaces must never collide.
+    QHash<QObject*, Owner_association>     m_owner_associations;
+    QHash<QWindow*, Target_association>    m_targets;
+    QSet<QWindow*>                         m_direct_targets;
+    QMetaObject::Connection                m_application_state_changed;
+    QMetaObject::Connection                m_focus_window_changed;
+    // True only after this service's latest LSFW_LOCK call succeeded.
+    bool                                   m_native_lock_owned = false;
+    bool                                   m_alt_pressed       = false;
+    bool                                   m_refresh_pending   = false;
+};
+
+QPointer<Foreground_lock_service>& foreground_lock_service_instance()
+{
+    static QPointer<Foreground_lock_service> service;
+    return service;
 }
 
-void prune_focus_guard_windows()
+Foreground_lock_service* foreground_lock_service()
 {
-    auto& windows = focus_guard_windows();
-    for (qsizetype index = windows.size(); index > 0; --index) {
-        const QPointer<QWindow>& window = windows[index - 1];
-        if (!window
-            || !window->flags().testFlag(Qt::WindowStaysOnTopHint)) {
-            windows.removeAt(index - 1);
-        }
+    auto* application =
+        qobject_cast<QGuiApplication*>(QCoreApplication::instance());
+    if (!application) {
+        return nullptr;
     }
-}
 
-bool has_visible_focus_guard_window()
-{
-    for (const QPointer<QWindow>& window : focus_guard_windows()) {
-        if (window
-            && window->isVisible()
-            && window->visibility() != QWindow::Minimized) {
-            return true;
-        }
+    auto& service = foreground_lock_service_instance();
+    if (!service) {
+        service = new Foreground_lock_service(application);
     }
-    return false;
-}
-
-void refresh_focus_steal_guard()
-{
-    prune_focus_guard_windows();
-
-    const bool should_lock =
-        QGuiApplication::applicationState() == Qt::ApplicationActive
-        && has_visible_focus_guard_window();
-
-    if (should_lock) {
-        // LockSetForegroundWindow only succeeds for the foreground process.
-        // The click which enables the eye normally guarantees that condition;
-        // WindowActivate re-applies it after an explicit user switch back.
-        if (current_process_owns_foreground_window()) {
-            LockSetForegroundWindow(LSFW_LOCK);
-        }
-    }
-    else {
-        LockSetForegroundWindow(LSFW_UNLOCK);
-    }
+    return service;
 }
 
 #endif
@@ -189,23 +466,10 @@ vnm_qml_chrome::System_window::System_window(QObject* parent)
         QCoreApplication::instance()->installEventFilter(this);
     }
 
-#ifdef Q_OS_WIN
-    ++focus_guard_owner_count();
-#endif
     update_alt_modifier_active();
 }
 
-vnm_qml_chrome::System_window::~System_window()
-{
-#ifdef Q_OS_WIN
-    int& owner_count = focus_guard_owner_count();
-    --owner_count;
-    if (owner_count == 0) {
-        focus_guard_windows().clear();
-        LockSetForegroundWindow(LSFW_UNLOCK);
-    }
-#endif
-}
+vnm_qml_chrome::System_window::~System_window() = default;
 
 qint64 vnm_qml_chrome::System_window::process_id() const
 {
@@ -234,15 +498,6 @@ bool vnm_qml_chrome::System_window::eventFilter(QObject* watched, QEvent* event)
                 // Known limitation: holding both physical Alt keys and
                 // releasing one reports "not held" until the next event.
                 set_alt_modifier_active(event->type() == QEvent::KeyPress);
-#ifdef Q_OS_WIN
-                if (event->type() == QEvent::KeyRelease
-                    && !focus_guard_windows().isEmpty()) {
-                    // Windows releases LockSetForegroundWindow whenever Alt is
-                    // pressed. Re-lock after a plain Alt gesture; Alt+Tab makes
-                    // the application inactive and therefore stays unlocked.
-                    refresh_focus_steal_guard();
-                }
-#endif
             }
             else {
                 // modifier_buttons was already updated from this event in
@@ -258,38 +513,7 @@ bool vnm_qml_chrome::System_window::eventFilter(QObject* watched, QEvent* event)
             // focus (e.g. Alt+Tab): that KeyRelease went elsewhere, so
             // resync from the physical keyboard state.
             sync_alt_modifier_active();
-#ifdef Q_OS_WIN
-            if (!focus_guard_windows().isEmpty()) {
-                refresh_focus_steal_guard();
-            }
-#endif
             break;
-
-#ifdef Q_OS_WIN
-        case QEvent::WindowActivate:
-            // A deliberate switch between this process's own windows makes
-            // Windows release the foreground lock. Re-apply it for the newly
-            // active window, but do no work until eye mode has been used.
-            if (!focus_guard_windows().isEmpty()) {
-                refresh_focus_steal_guard();
-            }
-            break;
-
-        case QEvent::WindowStateChange:
-        case QEvent::Show:
-        case QEvent::Hide:
-            if (focus_guard_window_event_is_relevant(watched)) {
-                refresh_focus_steal_guard();
-            }
-            break;
-
-        case QEvent::Destroy:
-            if (focus_guard_window_event_is_relevant(watched)) {
-                remove_focus_guard_window(watched);
-                refresh_focus_steal_guard();
-            }
-            break;
-#endif
 
         default:
             break;
@@ -374,10 +598,25 @@ bool vnm_qml_chrome::System_window::set_window_stays_on_top(
     const bool effective =
         window->flags().testFlag(Qt::WindowStaysOnTopHint);
 #ifdef Q_OS_WIN
-    set_focus_guard_window(window, effective);
-    refresh_focus_steal_guard();
+    if (auto* service = foreground_lock_service()) {
+        service->associate_direct_target(window);
+    }
 #endif
     return effective == enabled;
+}
+
+void vnm_qml_chrome::System_window::track_window_stays_on_top(
+    QObject* owner,
+    QWindow* window)
+{
+#ifdef Q_OS_WIN
+    if (auto* service = foreground_lock_service()) {
+        service->associate_owner(owner, window);
+    }
+#else
+    Q_UNUSED(owner);
+    Q_UNUSED(window);
+#endif
 }
 
 QSize vnm_qml_chrome::System_window::native_window_physical_size(

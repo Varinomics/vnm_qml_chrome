@@ -5,6 +5,9 @@
 #include "vnm_qml_chrome/vnm_system_window.h"
 
 #include <QColor>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
 #include <QKeyEvent>
@@ -15,7 +18,9 @@
 #include <QQuickWindow>
 #include <QResource>
 #include <QSignalSpy>
+#include <QStyleHints>
 #include <QString>
+#include <QXmlStreamReader>
 #include <QtTest/QTest>
 
 #include <cmath>
@@ -445,6 +450,172 @@ Window {
         QVERIFY(!system_window.set_window_stays_on_top(nullptr, true));
     }
 
+#ifdef Q_OS_WIN
+    void system_window_direct_and_owner_associations_have_independent_lifetimes()
+    {
+        vnm_qml_chrome::System_window system_window;
+        auto window_a = std::make_unique<QQuickWindow>();
+        auto window_b = std::make_unique<QQuickWindow>();
+        auto window_c = std::make_unique<QQuickWindow>();
+
+        window_a->setFlags(Qt::Window | Qt::FramelessWindowHint);
+        window_b->setFlags(Qt::Window | Qt::FramelessWindowHint);
+        window_c->setFlags(Qt::Window | Qt::FramelessWindowHint);
+
+        // A first owns itself, then becomes a direct target. Replacing A -> A
+        // with A -> B must retain A's direct reference; destroying A must remove
+        // that reference and B's owner reference without either destruction
+        // callback refreshing through the partially destroyed A.
+        system_window.track_window_stays_on_top(window_a.get(), window_a.get());
+        QVERIFY(system_window.set_window_stays_on_top(window_a.get(), true));
+        system_window.track_window_stays_on_top(window_a.get(), window_b.get());
+        window_a.reset();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        // A replaceable owner association may overlap direct registrations for
+        // both targets. Destroying the owner must not discard either direct
+        // membership.
+        auto owner = std::make_unique<QObject>();
+        QVERIFY(system_window.set_window_stays_on_top(window_b.get(), true));
+        {
+            vnm_qml_chrome::System_window temporary_facade;
+            QVERIFY(temporary_facade.set_window_stays_on_top(window_c.get(), true));
+        }
+        system_window.track_window_stays_on_top(owner.get(), window_b.get());
+        system_window.track_window_stays_on_top(owner.get(), window_c.get());
+        owner.reset();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        window_b->show();
+        window_c->show();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        window_b->setWindowState(Qt::WindowMinimized);
+        window_b->setFlag(Qt::WindowStaysOnTopHint, false);
+        window_b->hide();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QVERIFY(window_c->flags().testFlag(Qt::WindowStaysOnTopHint));
+        QVERIFY(window_c->isVisible());
+
+        window_b.reset();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        window_c->setWindowState(Qt::WindowMinimized);
+        window_c->setWindowState(Qt::WindowNoState);
+        window_c->hide();
+        window_c->show();
+        window_c->setFlag(Qt::WindowStaysOnTopHint, false);
+        window_c->setFlag(Qt::WindowStaysOnTopHint, true);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QVERIFY(window_c->flags().testFlag(Qt::WindowStaysOnTopHint));
+    }
+#endif
+
+    void foreground_lock_service_source_preserves_lifecycle_and_ownership_invariants()
+    {
+        const QFileInfo test_source(QString::fromUtf8(__FILE__));
+        QFile source_file(test_source.dir().absoluteFilePath(
+            QStringLiteral("../src/vnm_system_window.cpp")));
+        QVERIFY2(source_file.open(QIODevice::ReadOnly),
+            qPrintable(source_file.errorString()));
+        const QByteArray source = source_file.readAll();
+        const QByteArray normalized_source = source.simplified();
+
+        QVERIFY(source.contains("class Foreground_lock_service : public QObject"));
+        QVERIFY(source.contains("QObject(application)"));
+        QVERIFY(source.contains("new Foreground_lock_service(application)"));
+        QVERIFY(source.contains("associate_direct_target(window)"));
+        QVERIFY(source.contains("associate_owner(owner, window)"));
+        QVERIFY(source.contains("QHash<QObject*, Owner_association>"));
+        QVERIFY(source.contains("QSet<QWindow*>"));
+
+        const qsizetype owner_function = source.indexOf(
+            "void associate_owner(QObject* owner, QWindow* window)");
+        const qsizetype owner_function_end = source.indexOf(
+            "protected:", owner_function);
+        QVERIFY(owner_function >= 0);
+        QVERIFY(owner_function_end > owner_function);
+        const QByteArray owner_source = source.mid(
+            owner_function, owner_function_end - owner_function);
+        const qsizetype replace_target = owner_source.indexOf(
+            "owner_it->window = window;");
+        const qsizetype add_target = owner_source.indexOf(
+            "add_target_reference(window);", replace_target);
+        const qsizetype release_previous = owner_source.indexOf(
+            "release_target_reference(previous_window);", add_target);
+        QVERIFY(replace_target >= 0);
+        QVERIFY(add_target > replace_target);
+        QVERIFY(release_previous > add_target);
+
+        for (const QByteArray& connection : {
+                 QByteArray("flags_changed"),
+                 QByteArray("visibility_changed"),
+                 QByteArray("window_state_changed"),
+                 QByteArray("active_changed"),
+                 QByteArray("destroyed")})
+        {
+            QVERIFY(normalized_source.contains(
+                "QMetaObject::Connection " + connection));
+            QVERIFY(normalized_source.contains(
+                "QObject::disconnect(association." + connection + ")"));
+        }
+        QVERIFY(normalized_source.contains(
+            "QMetaObject::Connection owner_destroyed"));
+        QVERIFY(normalized_source.contains(
+            "QObject::disconnect(association.owner_destroyed)"));
+
+        QVERIFY(source.contains("&QWindow::flagsChanged"));
+        QVERIFY(source.contains("&QWindow::visibilityChanged"));
+        QVERIFY(source.contains("&QWindow::windowStateChanged"));
+        QVERIFY(source.contains("&QWindow::activeChanged"));
+        QVERIFY(source.contains("&QGuiApplication::applicationStateChanged"));
+        QVERIFY(source.contains("&QGuiApplication::focusWindowChanged"));
+        QVERIFY(source.contains("m_direct_targets.remove(window)"));
+        QVERIFY(source.contains("m_owner_associations.erase(owner_it)"));
+
+        const qsizetype remove_owner = source.indexOf(
+            "void remove_owner(QObject* owner)");
+        const qsizetype remove_target = source.indexOf(
+            "void remove_target(QObject* object)", remove_owner);
+        QVERIFY(remove_owner >= 0);
+        QVERIFY(remove_target > remove_owner);
+        const QByteArray remove_owner_source = source.mid(
+            remove_owner, remove_target - remove_owner);
+        QVERIFY(remove_owner_source.contains("release_target_reference"));
+        QVERIFY(remove_owner_source.contains("schedule_native_lock_refresh()"));
+        QVERIFY(!remove_owner_source.contains("refresh_native_lock();"));
+
+        const qsizetype eligibility = source.indexOf(
+            "bool has_eligible_target() const");
+        QVERIFY(eligibility >= 0);
+        const QByteArray eligibility_source = source.mid(eligibility);
+        QVERIFY(eligibility_source.contains("m_targets.cbegin()"));
+        QVERIFY(eligibility_source.contains("Qt::WindowStaysOnTopHint"));
+        QVERIFY(eligibility_source.contains("window->isVisible()"));
+        QVERIFY(eligibility_source.contains("QWindow::Minimized"));
+        QVERIFY(eligibility_source.contains("Qt::WindowMinimized"));
+
+        const qsizetype refresh = source.indexOf("void refresh_native_lock()");
+        const qsizetype lock_call = source.indexOf(
+            "LockSetForegroundWindow(LSFW_LOCK) != FALSE", refresh);
+        const qsizetype record_lock = source.indexOf(
+            "m_native_lock_owned = true", lock_call);
+        const qsizetype unlock_guard = source.indexOf(
+            "if (!m_native_lock_owned) {", record_lock);
+        const qsizetype unlock_call = source.indexOf(
+            "LockSetForegroundWindow(LSFW_UNLOCK) != FALSE", unlock_guard);
+        QVERIFY(refresh >= 0);
+        QVERIFY(lock_call > refresh);
+        QVERIFY(record_lock > lock_call);
+        QVERIFY(unlock_guard > record_lock);
+        QVERIFY(unlock_call > unlock_guard);
+        QCOMPARE(
+            source.count("LockSetForegroundWindow(LSFW_UNLOCK)"),
+            qsizetype(1));
+        QVERIFY(source.contains("handle_automatic_native_unlock()"));
+        QVERIFY(source.contains("m_native_lock_owned = false"));
+        QVERIFY(source.contains("schedule_native_lock_refresh()"));
+        QVERIFY(source.contains("m_alt_pressed"));
+    }
+
     void native_frame_normalizes_invalid_frame_width()
     {
         VNM_NativeWindowFrame frame;
@@ -738,7 +909,6 @@ Item {
         QVERIFY(has_property(mark, "pid_phase"));
         QVERIFY(has_property(mark, "pid_layout_width"));
         QVERIFY(has_signal(mark, "move_requested()"));
-        QVERIFY(has_signal(mark, "maximize_toggle_requested()"));
         QVERIFY(has_signal(mark, "alt_click_requested()"));
         QVERIFY(has_signal(mark, "stay_on_top_change_requested(bool)"));
 
@@ -2122,6 +2292,12 @@ Item {
         QCOMPARE(titlebar->property("mark_stay_on_top_enabled").toBool(), true);
         QCOMPARE(mark->property("stay_on_top_enabled").toBool(), true);
         QCOMPARE(mark->property("stay_on_top_active").toBool(), false);
+        QCOMPARE(
+            titlebar->property("move_drag_threshold").toInt(),
+            QGuiApplication::styleHints()->startDragDistance());
+        QCOMPARE(
+            mark->property("move_drag_threshold").toInt(),
+            QGuiApplication::styleHints()->startDragDistance());
         QVERIFY(titlebar->setProperty("mark_pid_reveal_enabled", false));
         QCOMPARE(mark->property("pid_reveal_enabled").toBool(), false);
         QVERIFY(titlebar->setProperty("mark_stay_on_top_enabled", false));
@@ -2134,7 +2310,7 @@ Item {
         QCOMPARE(object_color(titlebar, "color"), QColor(QStringLiteral("#405060")));
     }
 
-    void titlebar_mark_topmost_request_updates_owning_window_flag()
+    void titlebar_mark_tracks_initial_external_and_requested_topmost_flags()
     {
         QQmlEngine engine;
         QVERIFY(vnm_init_qml_chrome_runtime(engine));
@@ -2148,7 +2324,7 @@ Window {
     width: 500
     height: 60
     visible: false
-    flags: Qt.Window | Qt.FramelessWindowHint
+    flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
 
     VNM_ChromeTitleBar {
         objectName: "chrome_titlebar"
@@ -2172,7 +2348,17 @@ Window {
             root.get(), QStringLiteral("vnm_animated_mark"));
         QVERIFY(titlebar != nullptr);
         QVERIFY(mark     != nullptr);
-        QVERIFY(!window->flags().testFlag(Qt::WindowStaysOnTopHint));
+        QVERIFY(window->flags().testFlag(Qt::WindowStaysOnTopHint));
+        QCOMPARE(titlebar->property("window_stays_on_top").toBool(), true);
+        QCOMPARE(mark->property("stay_on_top_active").toBool(), true);
+
+        window->setFlag(Qt::WindowStaysOnTopHint, false);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !window->flags().testFlag(Qt::WindowStaysOnTopHint),
+            1000);
+        QCOMPARE(titlebar->property("window_stays_on_top").toBool(), false);
+        QCOMPARE(mark->property("stay_on_top_active").toBool(), false);
+        QVERIFY(window->flags().testFlag(Qt::FramelessWindowHint));
 
         QVERIFY(QMetaObject::invokeMethod(
             mark,
@@ -2184,6 +2370,20 @@ Window {
         QCOMPARE(titlebar->property("window_stays_on_top").toBool(), true);
         QCOMPARE(mark->property("stay_on_top_active").toBool(), true);
         QVERIFY(window->flags().testFlag(Qt::FramelessWindowHint));
+
+        window->setFlag(Qt::WindowStaysOnTopHint, false);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !window->flags().testFlag(Qt::WindowStaysOnTopHint),
+            1000);
+        QCOMPARE(titlebar->property("window_stays_on_top").toBool(), false);
+        QCOMPARE(mark->property("stay_on_top_active").toBool(), false);
+
+        window->setFlag(Qt::WindowStaysOnTopHint, true);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            window->flags().testFlag(Qt::WindowStaysOnTopHint),
+            1000);
+        QCOMPARE(titlebar->property("window_stays_on_top").toBool(), true);
+        QCOMPARE(mark->property("stay_on_top_active").toBool(), true);
 
         QVERIFY(QMetaObject::invokeMethod(
             mark,
@@ -2712,6 +2912,136 @@ VNM_AnimatedMark {
             500);
     }
 
+    void animated_mark_plain_release_preserves_morph_through_synchronous_feedback()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+Item {
+    id: root
+
+    width: 40
+    height: 40
+    property int topmost_request_count: 0
+    property int effective_feedback_count: 0
+    property bool last_topmost_request: false
+
+    VNM_AnimatedMark {
+        id: mark
+        objectName: "animated_mark"
+        anchors.centerIn: parent
+        mark_size: 20
+
+        onStay_on_top_change_requested: (requested_active) => {
+            root.topmost_request_count += 1
+            root.last_topmost_request = requested_active
+            mark.stay_on_top_active = requested_active
+            root.effective_feedback_count += 1
+        }
+    }
+
+    QtObject {
+        id: mouse_probe
+
+        property real x: 10
+        property real y: 10
+        property int button: Qt.LeftButton
+        property int buttons: Qt.NoButton
+        property int modifiers: Qt.NoModifier
+        property bool accepted: false
+    }
+
+    function plain_click() {
+        mouse_probe.buttons = Qt.LeftButton
+        mouse_probe.accepted = false
+        mark.handle_primary_press(mouse_probe)
+        mouse_probe.buttons = Qt.NoButton
+        mark.handle_primary_release(mouse_probe)
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine,
+            qml_source,
+            "qrc:/tests/animated_mark_immediate_click_morph_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QObject* mark = find_descendant(
+            root.get(), QStringLiteral("animated_mark"));
+        QObject* grey = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_grey"));
+        QObject* orange = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_orange"));
+        QObject* eye = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_stay_on_top_eye"));
+        QVERIFY(mark   != nullptr);
+        QVERIFY(grey   != nullptr);
+        QVERIFY(orange != nullptr);
+        QVERIFY(eye    != nullptr);
+
+        QVERIFY(mark->setProperty("hover_active", true));
+        QTest::qWait(45);
+        const qreal orange_target_scale =
+            mark->property("orange_scale").toReal();
+        QVERIFY(orange->property("scale").toReal() > 1.0);
+        QVERIFY(orange->property("scale").toReal() < orange_target_scale);
+        QCOMPARE(mark->property("state").toString(), QStringLiteral("normal_hover"));
+
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "plain_click"));
+        QCOMPARE(root->property("topmost_request_count").toInt(), 1);
+        QCOMPARE(root->property("effective_feedback_count").toInt(), 1);
+        QCOMPARE(root->property("last_topmost_request").toBool(), true);
+        QCOMPARE(mark->property("stay_on_top_active").toBool(), true);
+        QCOMPARE(mark->property("state").toString(), QStringLiteral("normal_hover"));
+        QVERIFY(mark->setProperty("hover_active", false));
+
+        qreal previous_scale = orange->property("scale").toReal();
+        qreal previous_radius = orange->property("radius").toReal();
+        qreal previous_offset = orange->property("circle_x_offset").toReal();
+        qreal previous_grey_opacity = grey->property("opacity").toReal();
+        auto verify_forward_geometry = [&]() {
+            QCOMPARE(
+                mark->property("state").toString(),
+                QStringLiteral("normal_hover"));
+
+            const qreal scale = orange->property("scale").toReal();
+            const qreal radius = orange->property("radius").toReal();
+            const qreal offset = orange->property("circle_x_offset").toReal();
+            const qreal grey_opacity = grey->property("opacity").toReal();
+            QVERIFY2(scale + 0.02 >= previous_scale,
+                "Synchronous topmost feedback reversed the orange scale morph.");
+            QVERIFY2(radius + 0.02 >= previous_radius,
+                "Synchronous topmost feedback reversed the orange radius morph.");
+            QVERIFY2(offset + 0.02 >= previous_offset,
+                "Synchronous topmost feedback reversed the orange offset morph.");
+            QVERIFY2(grey_opacity <= previous_grey_opacity + 0.02,
+                "Synchronous topmost feedback made the grey mark reappear.");
+            previous_scale = scale;
+            previous_radius = radius;
+            previous_offset = offset;
+            previous_grey_opacity = grey_opacity;
+        };
+
+        for (int sample = 0; sample < 80; ++sample) {
+            verify_forward_geometry();
+            QTest::qWait(5);
+        }
+
+        QCOMPARE(root->property("topmost_request_count").toInt(), 1);
+        QVERIFY(nearly_equal(
+            orange->property("scale").toReal(), orange_target_scale));
+        QVERIFY(qAbs(grey->property("opacity").toReal()) < 0.01);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(eye->property("opacity").toReal() - 1.0) < 0.01,
+            1000);
+    }
+
     void animated_mark_plain_click_toggles_eye_ctrl_click_reveals_pid()
     {
         QQmlEngine engine;
@@ -2808,12 +3138,25 @@ Item {
         return mouse_probe.accepted
     }
 
-    function drag_from_mark_does_not_toggle() {
+    function below_threshold_motion_does_not_move() {
+        const moves_before = root.move_request_count
+        prepare_mouse(Qt.NoModifier, 0, 0, Qt.LeftButton)
+        mark.handle_primary_press(mouse_probe)
+        mouse_probe.accepted = false
+        mouse_probe.x = mark.move_drag_threshold - 0.25
+        mark.maybe_start_system_move(mouse_probe)
+        const result = root.move_request_count === moves_before
+            && !mouse_probe.accepted
+        mark.cancel_primary_press()
+        return result
+    }
+
+    function threshold_drag_does_not_toggle() {
         const requests_before = root.topmost_request_count
         const moves_before = root.move_request_count
         prepare_mouse(Qt.NoModifier, 0, 0, Qt.LeftButton)
         mark.handle_primary_press(mouse_probe)
-        mouse_probe.x = 3
+        mouse_probe.x = mark.move_drag_threshold
         mark.maybe_start_system_move(mouse_probe)
         mouse_probe.buttons = Qt.NoButton
         mark.handle_primary_release(mouse_probe)
@@ -2837,6 +3180,7 @@ Item {
         QCOMPARE(eye->property("source").toUrl().fileName(),
             QStringLiteral("vnm_mark_eye.svg"));
         QCOMPARE(eye->property("status").toInt(), 1);
+        QVERIFY(mark->property("move_drag_threshold").toReal() > 0);
 
         QVERIFY(QMetaObject::invokeMethod(root.get(), "plain_click"));
         QCOMPARE(root->property("topmost_request_count").toInt(), 1);
@@ -2880,12 +3224,20 @@ Item {
         QVERIFY(ctrl_click_result.toBool());
         QCOMPARE(root->property("topmost_request_count").toInt(), 2);
 
-        QVariant drag_result;
+        QVariant below_threshold_result;
         QVERIFY(QMetaObject::invokeMethod(
             root.get(),
-            "drag_from_mark_does_not_toggle",
-            Q_RETURN_ARG(QVariant, drag_result)));
-        QVERIFY(drag_result.toBool());
+            "below_threshold_motion_does_not_move",
+            Q_RETURN_ARG(QVariant, below_threshold_result)));
+        QVERIFY(below_threshold_result.toBool());
+
+        QVariant threshold_drag_result;
+        QVERIFY(QMetaObject::invokeMethod(
+            root.get(),
+            "threshold_drag_does_not_toggle",
+            Q_RETURN_ARG(QVariant, threshold_drag_result)));
+        QVERIFY(threshold_drag_result.toBool());
+        QCOMPARE(root->property("topmost_request_count").toInt(), 2);
 
         QVERIFY(mark->setProperty("hover_active", true));
         QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
@@ -2931,6 +3283,236 @@ Item {
         QTRY_VERIFY_WITH_TIMEOUT(
             mark->property("pid_phase").toString().isEmpty(),
             5000);
+    }
+
+    void titlebar_routes_double_clicks_by_hit_target()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+Window {
+    width: 320
+    height: 60
+    visible: true
+
+    VNM_ChromeTitleBar {
+        objectName: "chrome_titlebar"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/titlebar_double_click_routing_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        auto* titlebar = find_descendant(
+            root.get(), QStringLiteral("chrome_titlebar"));
+        auto* mark = find_item(
+            root.get(), QStringLiteral("vnm_animated_mark"));
+        QVERIFY(window   != nullptr);
+        QVERIFY(titlebar != nullptr);
+        QVERIFY(mark     != nullptr);
+        QVERIFY(mark->property("move_enabled").toBool());
+        QCOMPARE(
+            mark->property("move_drag_threshold").toInt(),
+            QGuiApplication::styleHints()->startDragDistance());
+
+        QSignalSpy maximize_spy(titlebar, SIGNAL(maximize_toggle_requested()));
+        QSignalSpy topmost_spy(mark, SIGNAL(stay_on_top_change_requested(bool)));
+        QVERIFY(maximize_spy.isValid());
+        QVERIFY(topmost_spy.isValid());
+
+        const QPointF mark_center = mark->mapToScene(
+            QPointF(mark->width() / 2.0, mark->height() / 2.0));
+        QTest::mouseDClick(
+            window,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            mark_center.toPoint());
+        QCOMPARE(topmost_spy.count(), 1);
+        QCOMPARE(maximize_spy.count(), 0);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QCOMPARE(topmost_spy.count(), 1);
+        QCOMPARE(maximize_spy.count(), 0);
+
+        const QPoint titlebar_background(
+            int(window->width() / 2.0),
+            int(qobject_cast<QQuickItem*>(titlebar)->height() / 2.0));
+        QTest::mouseDClick(
+            window,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            titlebar_background);
+        QCOMPARE(maximize_spy.count(), 1);
+        QCOMPARE(topmost_spy.count(), 1);
+    }
+
+    void animated_mark_eye_resource_is_a_transparent_white_path()
+    {
+        QFile eye_file(
+            QStringLiteral(":/vnm_qml_chrome/qml/VNM_Chrome/vnm_mark_eye.svg"));
+        QVERIFY(eye_file.open(QIODevice::ReadOnly));
+
+        QXmlStreamReader svg(&eye_file);
+        int svg_count  = 0;
+        int path_count = 0;
+        int rect_count = 0;
+        QColor fill;
+        QString stroke;
+        while (!svg.atEnd()) {
+            svg.readNext();
+            if (!svg.isStartElement()) {
+                continue;
+            }
+
+            const QXmlStreamAttributes attributes = svg.attributes();
+            if (svg.name() == QStringLiteral("svg")) {
+                ++svg_count;
+                QVERIFY(!attributes.hasAttribute(QStringLiteral("fill")));
+                QVERIFY(!attributes.hasAttribute(QStringLiteral("style")));
+            }
+            else if (svg.name() == QStringLiteral("path")) {
+                ++path_count;
+                fill = QColor(
+                    attributes.value(QStringLiteral("fill")).toString());
+                stroke = attributes.value(
+                    QStringLiteral("stroke")).toString();
+                QVERIFY(!attributes.hasAttribute(QStringLiteral("style")));
+            }
+            else if (svg.name() == QStringLiteral("rect")) {
+                ++rect_count;
+            }
+        }
+
+        QVERIFY2(!svg.hasError(), qPrintable(svg.errorString()));
+        QCOMPARE(svg_count, 1);
+        QCOMPARE(path_count, 1);
+        QCOMPARE(rect_count, 0);
+        QCOMPARE(fill, QColor(QStringLiteral("#ffffff")));
+        QVERIFY(stroke.isEmpty() || stroke == QStringLiteral("none"));
+    }
+
+    void animated_mark_eye_twenty_pixel_render_stays_transparent_and_bright()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+VNM_AnimatedMark {
+    objectName: "animated_mark"
+    mark_size: 20
+}
+)";
+
+        std::unique_ptr<QObject> root_object = create_qml_object(
+            engine, qml_source, "qrc:/tests/animated_mark_eye_render_contract.qml");
+        auto* mark = qobject_cast<QQuickItem*>(root_object.get());
+        QVERIFY(mark != nullptr);
+
+        auto* grey = find_item(root_object.get(), QStringLiteral("vnm_mark_grey"));
+        auto* eye = find_item(
+            root_object.get(), QStringLiteral("vnm_mark_stay_on_top_eye"));
+        QVERIFY(grey != nullptr);
+        QVERIFY(eye  != nullptr);
+
+        QQuickWindow window;
+        window.setColor(QColor(QStringLiteral("#315a7d")));
+        window.resize(20, 20);
+        mark->setParentItem(window.contentItem());
+        QVERIFY(mark->setProperty("hover_active", true));
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(grey->property("opacity").toReal()) < 0.01,
+            1000);
+        auto circle_settled = [mark]() {
+            QVariant settled;
+            return QMetaObject::invokeMethod(
+                       mark,
+                       "circle_settled",
+                       Q_RETURN_ARG(QVariant, settled))
+                && settled.toBool();
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(circle_settled(), 1000);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        const QImage baseline = window.grabWindow();
+        QVERIFY(!baseline.isNull());
+        QCOMPARE(baseline.size(), QSize(20, 20));
+
+        QVERIFY(mark->setProperty("stay_on_top_active", true));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(eye->property("opacity").toReal() - 1.0) < 0.01,
+            1000);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        const QImage with_eye = window.grabWindow();
+        QVERIFY(!with_eye.isNull());
+        QCOMPARE(with_eye.size(), baseline.size());
+
+        constexpr int channel_tolerance = 3;
+        auto pixels_nearly_equal = [](const QColor& lhs, const QColor& rhs) {
+            return qAbs(lhs.red()   - rhs.red())   <= channel_tolerance
+                && qAbs(lhs.green() - rhs.green()) <= channel_tolerance
+                && qAbs(lhs.blue()  - rhs.blue())  <= channel_tolerance
+                && qAbs(lhs.alpha() - rhs.alpha()) <= channel_tolerance;
+        };
+
+        // These are the corners of the centred 16x16 Image canvas. They must
+        // expose the same underlying pixels rather than an opaque SVG matte.
+        for (const QPoint& point : {
+                 QPoint(2, 2), QPoint(17, 2), QPoint(2, 17), QPoint(17, 17)})
+        {
+            QVERIFY(pixels_nearly_equal(
+                baseline.pixelColor(point), with_eye.pixelColor(point)));
+        }
+
+        int changed_pixel_count = 0;
+        int near_white_count     = 0;
+        for (int y = 0; y < baseline.height(); ++y) {
+            for (int x = 0; x < baseline.width(); ++x) {
+                const QColor before = baseline.pixelColor(x, y);
+                const QColor after  = with_eye.pixelColor(x, y);
+                if (pixels_nearly_equal(before, after)) {
+                    continue;
+                }
+
+                ++changed_pixel_count;
+                const QByteArray message = QStringLiteral(
+                    "eye darkened its baseline at x=%1 y=%2: before=%3 after=%4")
+                    .arg(x)
+                    .arg(y)
+                    .arg(before.name(QColor::HexArgb))
+                    .arg(after.name(QColor::HexArgb))
+                    .toUtf8();
+                QVERIFY2(
+                    after.red()   + channel_tolerance >= before.red()
+                    && after.green() + channel_tolerance >= before.green()
+                    && after.blue()  + channel_tolerance >= before.blue(),
+                    message.constData());
+                if (after.red() >= 235
+                    && after.green() >= 235
+                    && after.blue() >= 235)
+                {
+                    ++near_white_count;
+                }
+            }
+        }
+
+        QVERIFY(changed_pixel_count > 0);
+        QVERIFY(near_white_count > 0);
     }
 
     void animated_mark_reveals_process_id_pill_on_request()
@@ -2981,6 +3563,16 @@ VNM_AnimatedMark {
             qAbs(pid_edit->property("opacity").toReal() - 1.0) < 0.01,
             1000);
 
+        QVERIFY(root->setProperty("mark_size", 80.0));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            nearly_equal(
+                pill->property("width").toReal(),
+                root->property("pid_pill_target_width").toReal()),
+            1000);
+        QCOMPARE(root->property("width").toReal(), 80.0);
+        QCOMPARE(pill->property("height").toReal(), 80.0);
+        QVERIFY(pill->property("width").toReal() >= 80.0);
+
         QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_retract"));
         QTRY_VERIFY_WITH_TIMEOUT(
             root->property("pid_phase").toString().isEmpty(),
@@ -2990,6 +3582,176 @@ VNM_AnimatedMark {
         QVERIFY(root->setProperty("pid_reveal_enabled", false));
         QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_reveal"));
         QCOMPARE(root->property("pid_phase").toString(), QString());
+    }
+
+    void animated_mark_live_size_changes_retarget_active_pid_animations()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+VNM_AnimatedMark {
+    objectName: "animated_mark"
+    mark_size: 20
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/animated_mark_pid_retarget_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QObject* pill = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_pid_pill"));
+        QVERIFY(pill != nullptr);
+        QVERIFY(root->setProperty("hover_active", true));
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_reveal"));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            root->property("pid_phase").toString(),
+            QStringLiteral("elongating"),
+            3000);
+
+        const qreal initial_target =
+            root->property("pid_pill_target_width").toReal();
+        QVERIFY(root->setProperty("mark_size", 90.0));
+        const qreal enlarged_target =
+            root->property("pid_pill_target_width").toReal();
+        QVERIFY(enlarged_target > initial_target);
+        QVERIFY(enlarged_target >= 90.0);
+        QTRY_COMPARE_WITH_TIMEOUT(
+            root->property("pid_phase").toString(),
+            QStringLiteral("revealed"),
+            5000);
+        QVERIFY(nearly_equal(
+            pill->property("width").toReal(), enlarged_target));
+
+        QVERIFY(root->setProperty("mark_size", 20.0));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            nearly_equal(
+                pill->property("width").toReal(),
+                root->property("pid_pill_target_width").toReal()),
+            1000);
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "request_pid_retract"));
+        QCOMPARE(
+            root->property("pid_phase").toString(),
+            QStringLiteral("retracting"));
+
+        QVERIFY(root->setProperty("mark_size", 36.0));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            root->property("pid_phase").toString().isEmpty(),
+            5000);
+        QVERIFY(nearly_equal(pill->property("width").toReal(), 36.0));
+        QCOMPARE(root->property("width").toReal(), 36.0);
+        QCOMPARE(root->property("height").toReal(), 36.0);
+        QVERIFY(!pill->property("visible").toBool());
+    }
+
+    void animated_mark_pid_escape_disablement_and_focus_are_lifecycle_safe()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+Window {
+    width: 240
+    height: 80
+    visible: true
+
+    Item {
+        objectName: "focus_before"
+        focus: true
+    }
+
+    Item {
+        objectName: "focus_after"
+    }
+
+    VNM_AnimatedMark {
+        objectName: "animated_mark"
+        anchors.centerIn: parent
+        mark_size: 20
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/animated_mark_pid_lifecycle_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        auto* mark = find_item(root.get(), QStringLiteral("animated_mark"));
+        auto* pid_edit = find_item(root.get(), QStringLiteral("vnm_mark_pid_edit"));
+        auto* focus_before = find_item(root.get(), QStringLiteral("focus_before"));
+        auto* focus_after = find_item(root.get(), QStringLiteral("focus_after"));
+        QVERIFY(window       != nullptr);
+        QVERIFY(mark         != nullptr);
+        QVERIFY(pid_edit     != nullptr);
+        QVERIFY(focus_before != nullptr);
+        QVERIFY(focus_after  != nullptr);
+
+        QVERIFY(QMetaObject::invokeMethod(focus_before, "forceActiveFocus"));
+        QTRY_VERIFY_WITH_TIMEOUT(focus_before->hasActiveFocus(), 1000);
+        QVERIFY(mark->setProperty("hover_active", true));
+
+        QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            mark->property("pid_phase").toString().isEmpty(),
+            1000);
+        QVERIFY(focus_before->hasActiveFocus());
+
+        QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(),
+            QStringLiteral("elongating"),
+            3000);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            mark->property("pid_phase").toString().isEmpty(),
+            3000);
+        QVERIFY(focus_before->hasActiveFocus());
+
+        QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(),
+            QStringLiteral("revealed"),
+            5000);
+        QVERIFY(pid_edit->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            mark->property("pid_phase").toString().isEmpty(),
+            5000);
+        QTRY_VERIFY_WITH_TIMEOUT(focus_before->hasActiveFocus(), 1000);
+
+        QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(),
+            QStringLiteral("revealed"),
+            5000);
+        QVERIFY(pid_edit->hasActiveFocus());
+        QVERIFY(QMetaObject::invokeMethod(focus_after, "forceActiveFocus"));
+        QTRY_VERIFY_WITH_TIMEOUT(focus_after->hasActiveFocus(), 1000);
+        QVERIFY(mark->setProperty("pid_reveal_enabled", false));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            mark->property("pid_phase").toString().isEmpty(),
+            5000);
+        QVERIFY(focus_after->hasActiveFocus());
+
+        QVERIFY(mark->setProperty("pid_reveal_enabled", true));
+        QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+        QVERIFY(mark->setProperty("pid_reveal_enabled", false));
+        QCOMPARE(mark->property("pid_phase").toString(), QString());
+        QVERIFY(focus_after->hasActiveFocus());
     }
 
     void system_window_tracks_alt_modifier_state()
@@ -3333,8 +4095,8 @@ Item {
     function under_threshold_move_is_ignored() {
         reset_probe()
         const mouse = {
-            x: 1,
-            y: 1,
+            x: chrome_titlebar.move_drag_threshold - 0.25,
+            y: 0,
             buttons: Qt.LeftButton,
             accepted: false,
         }
@@ -3344,10 +4106,10 @@ Item {
             && mouse.accepted === false
     }
 
-    function over_threshold_move_is_synchronous() {
+    function at_threshold_move_is_synchronous() {
         reset_probe()
         const mouse = {
-            x: 3,
+            x: chrome_titlebar.move_drag_threshold,
             y: 0,
             buttons: Qt.LeftButton,
             accepted: false,
@@ -3373,12 +4135,12 @@ Item {
             Q_RETURN_ARG(QVariant, under_threshold_result)));
         QVERIFY(under_threshold_result.toBool());
 
-        QVariant over_threshold_result;
+        QVariant at_threshold_result;
         QVERIFY(QMetaObject::invokeMethod(
             root.get(),
-            "over_threshold_move_is_synchronous",
-            Q_RETURN_ARG(QVariant, over_threshold_result)));
-        QVERIFY(over_threshold_result.toBool());
+            "at_threshold_move_is_synchronous",
+            Q_RETURN_ARG(QVariant, at_threshold_result)));
+        QVERIFY(at_threshold_result.toBool());
     }
 
     void titlebar_title_editing_is_opt_in_and_commits_completed_edits()
@@ -3487,16 +4249,62 @@ Window {
         QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), false);
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
 
-        QVERIFY(QMetaObject::invokeMethod(animated_mark, "alt_click_requested"));
+        const QVariantMap alt_mouse{
+            {QStringLiteral("button"),    int(Qt::LeftButton)},
+            {QStringLiteral("modifiers"), int(Qt::AltModifier)},
+            {QStringLiteral("accepted"),  false},
+        };
+        QVERIFY(QMetaObject::invokeMethod(focus_sink, "forceActiveFocus"));
+        QTRY_VERIFY_WITH_TIMEOUT(focus_sink->property("activeFocus").toBool(), 1000);
+        QVERIFY(animated_mark->setProperty("hover_active", true));
+        QVERIFY(QMetaObject::invokeMethod(animated_mark, "request_pid_reveal"));
+        QCOMPARE(
+            animated_mark->property("pid_phase").toString(),
+            QStringLiteral("forming"));
+        QVERIFY(QMetaObject::invokeMethod(
+            animated_mark,
+            "handle_primary_press",
+            Q_ARG(QVariant, QVariant(alt_mouse))));
+        QCOMPARE(animated_mark->property("pid_phase").toString(), QString());
         QCOMPARE(editor_frame->property("visible").toBool(), true);
-        QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), true);
+        QTRY_VERIFY_WITH_TIMEOUT(editor->property("activeFocus").toBool(), 1000);
+        QTest::qWait(500);
+        QCOMPARE(animated_mark->property("pid_phase").toString(), QString());
+        QCOMPARE(editor->property("activeFocus").toBool(), true);
+
         auto* window = qobject_cast<QWindow*>(root.get());
         QVERIFY(window != nullptr);
         QTest::keyClick(window, Qt::Key_Escape);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         QCOMPARE(accepted_spy.count(), 0);
         QCOMPARE(editor_frame->property("visible").toBool(), false);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !animated_mark->property("alt_reveal_active").toBool(),
+            3000);
+
+        QVERIFY(animated_mark->setProperty("hover_active", true));
+        QVERIFY(QMetaObject::invokeMethod(animated_mark, "request_pid_reveal"));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            animated_mark->property("pid_phase").toString(),
+            QStringLiteral("revealed"),
+            5000);
+        QVERIFY(QMetaObject::invokeMethod(
+            animated_mark,
+            "handle_primary_press",
+            Q_ARG(QVariant, QVariant(alt_mouse))));
+        QCOMPARE(editor_frame->property("visible").toBool(), true);
+        QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), true);
+        QCOMPARE(
+            animated_mark->property("pid_phase").toString(),
+            QStringLiteral("retracting"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QCOMPARE(accepted_spy.count(), 0);
+        QCOMPARE(editor_frame->property("visible").toBool(), false);
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            animated_mark->property("pid_phase").toString().isEmpty(),
+            5000);
 
         QVERIFY(QMetaObject::invokeMethod(
             root.get(),

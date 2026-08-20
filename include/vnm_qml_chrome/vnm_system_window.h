@@ -39,10 +39,28 @@ public:
      * On Windows, an enabled topmost window also guards the foreground process
      * against unsolicited SetForegroundWindow calls. Explicit user switching
      * remains possible and automatically releases that operating-system lock.
+     * Calling this function registers the window through its lifetime, so the
+     * guard continues to follow later external flag, visibility, and state
+     * changes.
+     *
+     * LockSetForegroundWindow exposes neither an ownership token nor a state
+     * query. This service must therefore be the sole coordinator of that API in
+     * the process; uncoordinated same-process callers cannot be made safe.
      */
     Q_INVOKABLE bool set_window_stays_on_top(
         QWindow* window,
         bool     enabled);
+    /**
+     * @brief Associate an owner with the window whose topmost state it exposes.
+     *
+     * Passing another window replaces the owner's previous association;
+     * passing null removes it. The association is also removed when the owner
+     * or window is destroyed. The association retains externally disabled,
+     * hidden, and minimized windows so later eligible states are observed.
+     */
+    Q_INVOKABLE void track_window_stays_on_top(
+        QObject* owner,
+        QWindow* window);
     /**
      * @brief Return the native physical window size, when it is usable.
      *

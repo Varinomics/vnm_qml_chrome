@@ -63,7 +63,6 @@ Item {
     readonly property real hover_circle_x_offset: 0.5
 
     signal move_requested()
-    signal maximize_toggle_requested()
     signal alt_click_requested()
     signal stay_on_top_change_requested(bool active)
 
@@ -84,30 +83,32 @@ Item {
         }
 
         icon_press_area.system_move_started = true
-        icon_press_area.stay_on_top_click_pending = false
+        icon_press_area.stay_on_top_press_candidate = false
         mark.cancel_pid_reveal()
         move_requested()
         mouse.accepted = true
     }
 
     function handle_primary_press(mouse) {
-        icon_press_area.stay_on_top_click_pending = false
+        icon_press_area.stay_on_top_press_candidate = false
 
-        if (mark.pid_pill_active
+        if (mark.pid_phase !== ""
             && !(mouse.modifiers & Qt.AltModifier)) {
             // Ctrl+click toggles the revealed pill back to the bare mark.
             if (mouse.button === Qt.LeftButton
-                && (mouse.modifiers & Qt.ControlModifier)) {
+                && (mouse.modifiers & Qt.ControlModifier)
+                && mark.pid_pill_active) {
                 mark.request_pid_retract()
             }
             mouse.accepted = true
             return
         }
 
-        if (mark.pid_pill_active) {
-            // Alt+click on the revealed pill: retract first, then let the
-            // normal Alt handling below run.
-            mark.request_pid_retract()
+        if (mark.pid_phase !== ""
+            && (mouse.modifiers & Qt.AltModifier)) {
+            // Title editing owns the Alt click, but no pending PID phase may
+            // survive long enough to take focus back from its editor.
+            mark.dismiss_pid_reveal()
         }
 
         if (mark.alt_click_enabled
@@ -140,9 +141,7 @@ Item {
             mark.request_pid_reveal()
         }
         else if (mouse.modifiers === Qt.NoModifier) {
-            // Toggle on release so moving the window from the mark does not
-            // accidentally change its topmost state.
-            icon_press_area.stay_on_top_click_pending =
+            icon_press_area.stay_on_top_press_candidate =
                 mark.stay_on_top_enabled
         }
 
@@ -155,28 +154,29 @@ Item {
             && mouse.y >= 0
             && mouse.y < icon_press_area.height
         const toggle_stay_on_top =
-            icon_press_area.stay_on_top_click_pending
+            icon_press_area.stay_on_top_press_candidate
             && !icon_press_area.system_move_started
             && release_inside
             && mouse.button === Qt.LeftButton
             && mouse.modifiers === Qt.NoModifier
 
         icon_press_area.system_move_started = false
-        icon_press_area.stay_on_top_click_pending = false
 
         if (toggle_stay_on_top) {
             mark.stay_on_top_change_requested(!mark.stay_on_top_active)
             mouse.accepted = true
         }
+        icon_press_area.stay_on_top_press_candidate = false
     }
 
     function cancel_primary_press() {
         icon_press_area.system_move_started = false
-        icon_press_area.stay_on_top_click_pending = false
+        icon_press_area.stay_on_top_press_candidate = false
         mark.cancel_pid_reveal()
     }
 
     function handle_pill_press(mouse) {
+        icon_press_area.stay_on_top_press_candidate = false
         if (mouse.button === Qt.LeftButton
             && (mouse.modifiers & Qt.ControlModifier)) {
             mark.request_pid_retract()
@@ -203,7 +203,9 @@ Item {
             return
         }
 
+        pid_edit.previous_focus_item = null
         pid_phase = "forming"
+        icon_press_area.stay_on_top_press_candidate = false
         pid_circle_settle_timer.start()
     }
 
@@ -213,7 +215,19 @@ Item {
         }
 
         pid_circle_settle_timer.stop()
+        pid_edit.previous_focus_item = null
         pid_phase = ""
+    }
+
+    function dismiss_pid_reveal() {
+        if (pid_phase === "forming") {
+            cancel_pid_reveal()
+            return
+        }
+
+        if (pid_phase === "elongating" || pid_phase === "revealed") {
+            request_pid_retract()
+        }
     }
 
     function begin_pid_elongation() {
@@ -221,8 +235,7 @@ Item {
         pid_edit.opacity = 0
         pid_phase = "elongating"
         pid_pill_growing = true
-        pid_pill_grow_animation.to = pid_pill_target_width
-        pid_pill_grow_animation.start()
+        animate_pid_pill_to_current_target()
         pid_edit_fade_animation.to = 1
         pid_edit_fade_animation.start()
     }
@@ -233,36 +246,117 @@ Item {
         }
 
         pid_phase = "retracting"
-        pid_edit.focus = false
         pid_pill_growing = false
-        pid_pill_grow_animation.stop()
         pid_edit_fade_animation.stop()
-        pid_pill_grow_animation.to = mark_size
-        pid_pill_grow_animation.start()
-        pid_edit_fade_animation.to = 0
-        pid_edit_fade_animation.start()
+        animate_pid_pill_to_current_target()
+        if (pid_phase === "retracting") {
+            pid_edit_fade_animation.to = 0
+            pid_edit_fade_animation.start()
+        }
     }
 
-    function on_pid_pill_animation_stopped() {
+    function animate_pid_pill_to_current_target() {
+        if (pid_phase !== "elongating" && pid_phase !== "retracting") {
+            return
+        }
+
+        const target_width = pid_phase === "elongating"
+            ? pid_pill_target_width
+            : mark_size
+        pid_pill_grow_animation.retargeting = true
+        pid_pill_grow_animation.stop()
+        pid_pill_grow_animation.retargeting = false
+
+        if (Math.abs(pid_pill.width - target_width) <= 0.5) {
+            pid_pill.width = target_width
+            settle_pid_pill_animation()
+            return
+        }
+
+        pid_pill_grow_animation.to = target_width
+        pid_pill_grow_animation.start()
+    }
+
+    function settle_pid_pill_animation() {
         if (pid_phase === "elongating" && pid_pill_growing) {
             pid_phase = "revealed"
+            const active_focus_item = mark.Window.window
+                ? mark.Window.window.activeFocusItem
+                : null
+            pid_edit.previous_focus_item = active_focus_item !== pid_edit
+                ? active_focus_item
+                : null
             pid_edit.forceActiveFocus()
+            return
         }
-        else if (pid_phase === "retracting" && !pid_pill_growing) {
-            // Also fires for the manual stop when a retract interrupts an
-            // elongation; only finish once the pill is fully closed.
-            if (pid_pill.width <= mark_size + 0.5) {
-                pid_edit.opacity = 0
-                pid_phase = ""
+
+        if (pid_phase === "retracting" && !pid_pill_growing) {
+            const restore_previous_focus = pid_edit.activeFocus
+            const previous_focus_item = pid_edit.previous_focus_item
+            pid_edit_fade_animation.stop()
+            pid_edit.focus = false
+            pid_edit.previous_focus_item = null
+            pid_edit.opacity = 0
+            pid_phase = ""
+            if (restore_previous_focus && previous_focus_item) {
+                previous_focus_item.forceActiveFocus()
             }
         }
     }
 
+    function on_pid_pill_animation_stopped() {
+        if (pid_pill_grow_animation.retargeting
+            || (pid_phase !== "elongating" && pid_phase !== "retracting")) {
+            return
+        }
+
+        const target_width = pid_phase === "elongating"
+            ? pid_pill_target_width
+            : mark_size
+        if (Math.abs(pid_pill.width - target_width) > 0.5) {
+            animate_pid_pill_to_current_target()
+            return
+        }
+
+        pid_pill.width = target_width
+        settle_pid_pill_animation()
+    }
+
     width: mark_size
     height: mark_size
-    state: (hover_active || stay_on_top_active || pid_phase !== "")
+    state: (hover_active
+            || stay_on_top_active
+            || icon_press_area.stay_on_top_press_candidate
+            || pid_phase !== "")
         ? "normal_hover"
         : ""
+
+    onPid_reveal_enabledChanged: {
+        if (!pid_reveal_enabled) {
+            dismiss_pid_reveal()
+        }
+    }
+
+    onPid_pill_target_widthChanged: {
+        if (pid_phase === "revealed") {
+            pid_pill.width = pid_pill_target_width
+        }
+        else if (pid_phase === "elongating") {
+            animate_pid_pill_to_current_target()
+        }
+    }
+
+    onMark_sizeChanged: {
+        if (pid_phase === "retracting") {
+            animate_pid_pill_to_current_target()
+        }
+    }
+
+    onStay_on_top_enabledChanged: {
+        if (!stay_on_top_enabled) {
+            icon_press_area.stay_on_top_press_candidate = false
+        }
+    }
 
     HoverHandler {
         id: icon_hover
@@ -410,7 +504,7 @@ Item {
         property real system_move_press_x: 0
         property real system_move_press_y: 0
         property bool system_move_started: false
-        property bool stay_on_top_click_pending: false
+        property bool stay_on_top_press_candidate: false
 
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
@@ -425,14 +519,20 @@ Item {
         onCanceled: mark.cancel_primary_press()
 
         onDoubleClicked: (mouse) => {
-            if (mark.move_enabled
-                && !mark.pid_reveal_enabled
-                && !mark.stay_on_top_enabled
-                && mouse.button === Qt.LeftButton) {
-                mark.maximize_toggle_requested()
+            if (mouse.button === Qt.LeftButton) {
+                icon_press_area.stay_on_top_press_candidate = false
                 mouse.accepted = true
             }
         }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        // Alt+click already retracts the PID before starting title editing;
+        // the active title editor must retain its own Escape handling.
+        enabled: mark.pid_phase !== "" && !mark.alt_reveal_forced
+        context: Qt.WindowShortcut
+        onActivated: mark.dismiss_pid_reveal()
     }
 
     Image {
@@ -480,6 +580,8 @@ Item {
             id: pid_edit
             objectName: "vnm_mark_pid_edit"
 
+            property Item previous_focus_item: null
+
             anchors.left: parent.left
             anchors.leftMargin: mark.pid_text_left_margin
             anchors.right: parent.right
@@ -506,10 +608,6 @@ Item {
                     event.accepted = true
                 }
             }
-            Keys.onEscapePressed: (event) => {
-                mark.request_pid_retract()
-                event.accepted = true
-            }
         }
 
         // Above the PID text so Ctrl+click retracts the pill from anywhere on
@@ -533,6 +631,8 @@ Item {
 
     NumberAnimation {
         id: pid_pill_grow_animation
+
+        property bool retargeting: false
 
         target: pid_pill
         property: "width"

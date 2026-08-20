@@ -12,9 +12,6 @@ Window {
     title: "VNM Chrome Example"
     color: "#1b1d20"
 
-    readonly property real device_pixel_ratio: root.screen
-        ? root.screen.devicePixelRatio
-        : 1
     readonly property real frame_width: 1
     readonly property bool frame_visible: visibility !== Window.FullScreen
 
@@ -44,7 +41,6 @@ Window {
         active: root.active
         maximized: root.visibility === Window.Maximized
         resize_enabled: root.visibility === Window.Windowed
-        device_pixel_ratio: root.device_pixel_ratio
         frame_color: root.color
         frame_outer_edge: root.frame_visible ? root.frame_width : 0
         frame_outer_edge_color: chrome_theme.window_frame_border

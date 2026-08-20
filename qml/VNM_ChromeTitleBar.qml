@@ -97,7 +97,8 @@ Rectangle {
                     device_pixel_ratio),
                 height)
             : 0
-    readonly property int move_drag_threshold: 2
+    readonly property int move_drag_threshold:
+        Application.styleHints.startDragDistance
 
     signal move_requested()
     signal resize_requested(int edges)
@@ -201,6 +202,23 @@ Rectangle {
         }
     }
 
+    QtObject {
+        id: topmost_window_tracker
+
+        property var tracked_window: titlebar.Window.window
+
+        onTracked_windowChanged: {
+            VNM_system_window.track_window_stays_on_top(
+                topmost_window_tracker,
+                tracked_window)
+        }
+        Component.onCompleted: {
+            VNM_system_window.track_window_stays_on_top(
+                topmost_window_tracker,
+                tracked_window)
+        }
+    }
+
     Rectangle {
         objectName: "titlebar_window_frame_top"
 
@@ -291,7 +309,6 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             Layout.rightMargin: titlebar.animated_mark_visible ? 8 : 0
             onMove_requested: titlebar.move_requested()
-            onMaximize_toggle_requested: titlebar.maximize_toggle_requested()
             onAlt_click_requested: titlebar.begin_title_edit()
             onStay_on_top_change_requested: (requested_active) => {
                 VNM_system_window.set_window_stays_on_top(
