@@ -29,6 +29,7 @@ Item {
     property bool resize_enabled: true
 
     property alias title: titlebar.title
+    property alias title_font_family: titlebar.title_font_family
     property alias title_editing_enabled: titlebar.title_editing_enabled
     property alias active: titlebar.active
     property alias maximized: titlebar.maximized

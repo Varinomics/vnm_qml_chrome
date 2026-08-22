@@ -4,6 +4,11 @@
 
 Requires Qt 6.11.1 or newer.
 
+Set `title_font_family` on `VNM_ChromeTitleBar` or
+`VNM_ChromeFrameShell` to use an application-supplied title font. The caller
+owns loading and packaging that font; `vnm_qml_chrome` only applies the family
+name to the title label and title editor.
+
 A plain left click on the Varinomics mark toggles an always-on-top eye.
 Ctrl+left-click reveals the process ID; a second Ctrl+left-click retracts it.
 Set `stay_on_top_enabled: false` or

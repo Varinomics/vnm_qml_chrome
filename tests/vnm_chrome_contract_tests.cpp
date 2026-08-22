@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QGuiApplication>
 #include <QImage>
 #include <QKeyEvent>
@@ -999,6 +1000,7 @@ Item {
         const char* titlebar_properties[] = {
             "theme",
             "title",
+            "title_font_family",
             "title_editing_enabled",
             "active",
             "maximized",
@@ -1053,6 +1055,7 @@ Item {
         objectName: "frame_shell"
         anchors.fill: parent
         title: "Shell"
+        title_font_family: "Caller Supplied Chrome Font"
         frame_color: "#102030"
         frame_outer_edge: 2
         frame_outer_edge_color: "#203040"
@@ -1087,6 +1090,7 @@ Item {
             "titlebar_height",
             "resize_enabled",
             "title",
+            "title_font_family",
             "title_editing_enabled",
             "active",
             "maximized",
@@ -1119,9 +1123,13 @@ Item {
         QVERIFY(has_signal(shell, "close_requested()"));
         QVERIFY(has_signal(shell, "title_edit_accepted(QString)"));
 
-        QVERIFY(find_descendant(
+        QObject* shell_titlebar = find_descendant(
             root.get(),
-            QStringLiteral("chrome_frame_shell_titlebar")) != nullptr);
+            QStringLiteral("chrome_frame_shell_titlebar"));
+        QVERIFY(shell_titlebar != nullptr);
+        QCOMPARE(
+            shell_titlebar->property("title_font_family").toString(),
+            QStringLiteral("Caller Supplied Chrome Font"));
         QVERIFY(find_descendant(
             root.get(),
             QStringLiteral("chrome_frame_shell_content")) != nullptr);
@@ -2269,6 +2277,7 @@ Item {
         anchors.top: parent.top
         theme: custom_theme
         title: "Theme"
+        title_font_family: "Caller Supplied Chrome Font"
     }
 }
 )";
@@ -2282,6 +2291,17 @@ Item {
             find_descendant(root.get(), QStringLiteral("chrome_titlebar")));
         QVERIFY(titlebar != nullptr);
         QCOMPARE(object_color(titlebar, "color"), QColor(QStringLiteral("#102030")));
+
+        QObject* title_label = find_descendant(root.get(), QStringLiteral("title_label"));
+        QObject* title_editor = find_descendant(root.get(), QStringLiteral("title_editor"));
+        QVERIFY(title_label != nullptr);
+        QVERIFY(title_editor != nullptr);
+        QCOMPARE(
+            title_label->property("font").value<QFont>().family(),
+            QStringLiteral("Caller Supplied Chrome Font"));
+        QCOMPARE(
+            title_editor->property("font").value<QFont>().family(),
+            QStringLiteral("Caller Supplied Chrome Font"));
 
         auto* mark = qobject_cast<QQuickItem*>(
             find_descendant(root.get(), QStringLiteral("vnm_animated_mark")));

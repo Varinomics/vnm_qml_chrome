@@ -9,6 +9,7 @@ Rectangle {
 
     property VNM_ChromeTheme theme: VNM_ChromeTheme {}
     property string title: ""
+    property string title_font_family: ""
     property bool title_editing_enabled: false
     property bool active: true
     property bool maximized: false
@@ -365,6 +366,7 @@ Rectangle {
             text: titlebar.title
             color: titlebar.theme.titlebar_text
             elide: Text.ElideRight
+            font.family: titlebar.title_font_family
             font.pointSize: 9.5
             visible: !title_editor_frame.visible
         }
@@ -401,6 +403,7 @@ Rectangle {
                 clip: true
                 selectByMouse: true
                 verticalAlignment: TextInput.AlignVCenter
+                font.family: titlebar.title_font_family
                 font.pointSize: 9.5
 
                 onAccepted: titlebar.accept_title_edit()
