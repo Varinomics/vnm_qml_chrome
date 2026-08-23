@@ -112,12 +112,21 @@ if(VNM_QML_CHROME_BUILD_TESTS)
     )
 
     if(BUILD_TESTING)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
         add_test(
             NAME vnm_chrome_contract_tests
             COMMAND ${CMAKE_COMMAND} -E env
                 ${vnm_qml_chrome_qt_test_environment}
                 "${vnm_qml_chrome_qt_runtime_path}"
                 "$<TARGET_FILE:vnm_chrome_contract_tests>"
+        )
+
+        add_test(
+            NAME vnm_mark_eye_provenance
+            COMMAND
+                "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_font_awesome_eye_provenance.py"
         )
     endif()
 endif()
