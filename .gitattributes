@@ -1,0 +1,6 @@
+LICENSES/CC-BY-4.0.txt text eol=lf
+THIRD_PARTY/font_awesome_eye.toml text eol=lf
+THIRD_PARTY/recipes/prepare_font_awesome_eye.py text eol=lf
+THIRD_PARTY_NOTICES.md text eol=lf
+qml/vnm_mark_eye.svg -text
+tests/test_font_awesome_eye_provenance.py text eol=lf

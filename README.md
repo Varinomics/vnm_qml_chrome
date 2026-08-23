@@ -42,8 +42,10 @@ Window {
 }
 ```
 
-The eye is the bundled `vnm_mark_eye.svg` (Font Awesome Free, see the file's
-attribution comment), so no font lookup is involved. On Windows, eye mode also
+The eye is the bundled `vnm_mark_eye.svg` (Font Awesome Free; see its
+[provenance manifest](THIRD_PARTY/font_awesome_eye.toml) and
+[third-party notice](THIRD_PARTY_NOTICES.md#font-awesome-free-regular-eye-icon)),
+so no font lookup is involved. On Windows, eye mode also
 rejects unsolicited foreground-window requests while the application is active;
 explicit user switching remains possible. Other platforms receive the
 always-on-top hint, subject to their window manager.

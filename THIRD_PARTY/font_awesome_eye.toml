@@ -1,0 +1,28 @@
+name = "Font Awesome Free regular eye icon"
+spdx_license_expression = "CC-BY-4.0"
+compliance_status = "resolved"
+copyright = "Copyright 2026 Fonticons, Inc."
+attribution = "Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com"
+modification_notice = "Changed the path fill from currentColor to #ffffff; geometry, viewBox, and upstream attribution are unchanged."
+
+upstream_repository = "https://github.com/FortAwesome/Font-Awesome"
+upstream_revision = "14c65a3747d0f3b751f15831fc719236aea8729d"
+input_path = "svgs-full/regular/eye.svg"
+input_url = "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/14c65a3747d0f3b751f15831fc719236aea8729d/svgs-full/regular/eye.svg"
+input_sha256 = "5d4b7b083f52b73884180f1390f73c1e359d2792b115d4dd4b8d84cf2de12bfe"
+input_size = 1544
+
+output_path = "qml/vnm_mark_eye.svg"
+output_sha256 = "31958c92e88b29a7e89d998fbc9b811303fb9e8669031e8d17c18d6c1a93219d"
+output_size = 1539
+view_box = "0 0 640 640"
+geometry_sha256 = "32c315cb75d58c198aca223a875207844a29b66e22733a8c96503322b4c581a1"
+
+recipe = "THIRD_PARTY/recipes/prepare_font_awesome_eye.py"
+recipe_sha256 = "277980e71ed9d982a7e10668370d36179672abfccfc890666a618705963e4804"
+recipe_command = "python THIRD_PARTY/recipes/prepare_font_awesome_eye.py <upstream-eye.svg> qml/vnm_mark_eye.svg"
+
+license_url = "https://creativecommons.org/licenses/by/4.0/legalcode.txt"
+license_text = "LICENSES/CC-BY-4.0.txt"
+license_text_sha256 = "0184bb911fad08c751c66ec52d6e4c815497fe3a65249bfddbdcffcf57439171"
+notice = "THIRD_PARTY_NOTICES.md#font-awesome-free-regular-eye-icon"
