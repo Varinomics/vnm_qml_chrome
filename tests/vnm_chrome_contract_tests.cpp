@@ -149,6 +149,25 @@ bool color_nearly_equal(
         std::abs(actual.alpha() - expected.alpha()) <= k_tolerance;
 }
 
+void compare_font_contract(const QFont& actual, const QFont& expected)
+{
+    QCOMPARE(actual.pointSizeF(),        expected.pointSizeF());
+    QCOMPARE(actual.pixelSize(),         expected.pixelSize());
+    QCOMPARE(actual.resolveMask(),       expected.resolveMask());
+    QCOMPARE(actual.family(),            expected.family());
+    QCOMPARE(actual.families(),          expected.families());
+    QCOMPARE(actual.styleName(),         expected.styleName());
+    QCOMPARE(actual.weight(),            expected.weight());
+    QCOMPARE(actual.style(),             expected.style());
+    QCOMPARE(actual.stretch(),           expected.stretch());
+    QCOMPARE(actual.hintingPreference(), expected.hintingPreference());
+    QCOMPARE(actual.capitalization(),    expected.capitalization());
+    QCOMPARE(actual.kerning(),           expected.kerning());
+    QCOMPARE(actual.letterSpacingType(), expected.letterSpacingType());
+    QCOMPARE(actual.letterSpacing(),     expected.letterSpacing());
+    QCOMPARE(actual.wordSpacing(),       expected.wordSpacing());
+}
+
 } // namespace
 
 class Vnm_chrome_contract_tests : public QObject
@@ -2257,11 +2276,32 @@ Item {
 
         static const char qml_source[] = R"(
 import QtQuick
+import QtQuick.Controls
 import VNM_Chrome
 
-Item {
+ApplicationWindow {
     width: 500
     height: 60
+    visible: false
+    font.family: "Inherited Chrome Font"
+    font.styleName: "Inherited Chrome Style"
+    font.weight: Font.DemiBold
+    font.hintingPreference: Font.PreferFullHinting
+    font.capitalization: Font.SmallCaps
+    font.kerning: false
+    font.letterSpacing: 1.25
+
+    Label {
+        objectName: "reference_title_label"
+        visible: false
+        font.pointSize: 9.5
+    }
+
+    TextInput {
+        objectName: "reference_title_editor"
+        visible: false
+        font.pointSize: 9.5
+    }
 
     VNM_ChromeTheme {
         id: custom_theme
@@ -2277,7 +2317,6 @@ Item {
         anchors.top: parent.top
         theme: custom_theme
         title: "Theme"
-        title_font_family: "Caller Supplied Chrome Font"
     }
 }
 )";
@@ -2294,14 +2333,51 @@ Item {
 
         QObject* title_label = find_descendant(root.get(), QStringLiteral("title_label"));
         QObject* title_editor = find_descendant(root.get(), QStringLiteral("title_editor"));
+        QObject* reference_title_label =
+            find_descendant(root.get(), QStringLiteral("reference_title_label"));
+        QObject* reference_title_editor =
+            find_descendant(root.get(), QStringLiteral("reference_title_editor"));
         QVERIFY(title_label != nullptr);
         QVERIFY(title_editor != nullptr);
-        QCOMPARE(
-            title_label->property("font").value<QFont>().family(),
-            QStringLiteral("Caller Supplied Chrome Font"));
-        QCOMPARE(
-            title_editor->property("font").value<QFont>().family(),
-            QStringLiteral("Caller Supplied Chrome Font"));
+        QVERIFY(reference_title_label != nullptr);
+        QVERIFY(reference_title_editor != nullptr);
+
+        const auto object_font = [](QObject* object) {
+            return object->property("font").value<QFont>();
+        };
+        compare_font_contract(
+            object_font(title_label), object_font(reference_title_label));
+        compare_font_contract(
+            object_font(title_editor), object_font(reference_title_editor));
+
+        QVERIFY(titlebar->setProperty(
+            "title_font_family",
+            QStringLiteral("Caller Supplied Chrome Font")));
+        QFont expected_title_label_font = object_font(reference_title_label);
+        QFont expected_title_editor_font = object_font(reference_title_editor);
+        expected_title_label_font.setFamily(QStringLiteral("Caller Supplied Chrome Font"));
+        expected_title_editor_font.setFamily(QStringLiteral("Caller Supplied Chrome Font"));
+        compare_font_contract(object_font(title_label), expected_title_label_font);
+        compare_font_contract(object_font(title_editor), expected_title_editor_font);
+
+        QVERIFY(titlebar->setProperty("title_font_family", QString()));
+        compare_font_contract(
+            object_font(title_label), object_font(reference_title_label));
+        compare_font_contract(
+            object_font(title_editor), object_font(reference_title_editor));
+
+        QFont updated_window_font = root->property("font").value<QFont>();
+        updated_window_font.setFamily(QStringLiteral("Updated Inherited Chrome Font"));
+        updated_window_font.setWeight(QFont::ExtraBold);
+        updated_window_font.setHintingPreference(QFont::PreferNoHinting);
+        updated_window_font.setCapitalization(QFont::AllUppercase);
+        updated_window_font.setKerning(true);
+        updated_window_font.setLetterSpacing(QFont::AbsoluteSpacing, 2.5);
+        QVERIFY(root->setProperty("font", updated_window_font));
+        compare_font_contract(
+            object_font(title_label), object_font(reference_title_label));
+        compare_font_contract(
+            object_font(title_editor), object_font(reference_title_editor));
 
         auto* mark = qobject_cast<QQuickItem*>(
             find_descendant(root.get(), QStringLiteral("vnm_animated_mark")));

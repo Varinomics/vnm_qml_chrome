@@ -204,6 +204,21 @@ Rectangle {
     }
 
     QtObject {
+        id: title_font_factory
+
+        function requested_font(family) {
+            // Qt.font routes pointSize through an integer setter. Mutating the
+            // value property afterward preserves the title's half-point size.
+            let requested_font = Qt.font({ pointSize: 10 })
+            requested_font.pointSize = 9.5
+            if (family.length > 0) {
+                requested_font.family = family
+            }
+            return requested_font
+        }
+    }
+
+    QtObject {
         id: topmost_window_tracker
 
         property var tracked_window: titlebar.Window.window
@@ -366,8 +381,7 @@ Rectangle {
             text: titlebar.title
             color: titlebar.theme.titlebar_text
             elide: Text.ElideRight
-            font.family: titlebar.title_font_family
-            font.pointSize: 9.5
+            font: title_font_factory.requested_font(titlebar.title_font_family)
             visible: !title_editor_frame.visible
         }
 
@@ -403,8 +417,7 @@ Rectangle {
                 clip: true
                 selectByMouse: true
                 verticalAlignment: TextInput.AlignVCenter
-                font.family: titlebar.title_font_family
-                font.pointSize: 9.5
+                font: title_font_factory.requested_font(titlebar.title_font_family)
 
                 onAccepted: titlebar.accept_title_edit()
                 onActiveFocusChanged: {
