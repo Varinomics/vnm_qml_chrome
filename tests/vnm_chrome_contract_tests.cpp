@@ -4,6 +4,7 @@
 #include "vnm_qml_chrome/vnm_native_window_frame.h"
 #include "vnm_qml_chrome/vnm_system_window.h"
 
+#include <QClipboard>
 #include <QColor>
 #include <QDir>
 #include <QFile>
@@ -3815,6 +3816,26 @@ Window {
             mark->property("pid_phase").toString().isEmpty(),
             3000);
         QVERIFY(focus_before->hasActiveFocus());
+
+        QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(),
+            QStringLiteral("revealed"),
+            5000);
+        QVERIFY(pid_edit->hasActiveFocus());
+        const QString clipboard_sentinel = QStringLiteral("unchanged clipboard");
+        QGuiApplication::clipboard()->setText(clipboard_sentinel);
+        QCOMPARE(QGuiApplication::clipboard()->text(), clipboard_sentinel);
+        QVERIFY(pid_edit->property("selectedText").toString().isEmpty());
+        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(
+            QGuiApplication::clipboard()->text(),
+            QString::number(QCoreApplication::applicationPid()),
+            1000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            mark->property("pid_phase").toString().isEmpty(),
+            5000);
+        QTRY_VERIFY_WITH_TIMEOUT(focus_before->hasActiveFocus(), 1000);
 
         QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
         QTRY_COMPARE_WITH_TIMEOUT(

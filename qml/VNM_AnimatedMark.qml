@@ -601,10 +601,11 @@ Item {
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_C
                     && (event.modifiers & Qt.ControlModifier)) {
-                    if (pid_edit.selectedText.length > 0) {
-                        pid_edit.copy()
-                        mark.request_pid_retract()
+                    if (pid_edit.selectedText.length === 0) {
+                        pid_edit.selectAll()
                     }
+                    pid_edit.copy()
+                    mark.request_pid_retract()
                     event.accepted = true
                 }
             }
