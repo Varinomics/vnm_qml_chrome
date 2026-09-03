@@ -23,10 +23,13 @@ Item {
     readonly property real pid_text_left_margin:
         (mark_size - hover_circle_radius_inset) / 2 + 2
     readonly property real pid_text_right_margin: 8
+    readonly property real pid_caption_spacing: 4
     readonly property real pid_layout_width: pid_pill.x + pid_pill.width
     readonly property real pid_pill_target_width: Math.max(
         mark_size,
-        Math.ceil(pid_metrics.advanceWidth)
+        Math.ceil(pid_caption_metrics.advanceWidth
+                + pid_caption_spacing
+                + pid_metrics.advanceWidth)
             + pid_text_left_margin
             + pid_text_right_margin)
     readonly property bool alt_hover_active:
@@ -576,37 +579,64 @@ Item {
         antialiasing: true
         visible: mark.pid_pill_active
 
-        TextInput {
-            id: pid_edit
-            objectName: "vnm_mark_pid_edit"
-
-            property Item previous_focus_item: null
+        // Holds the caption and the number and clips both while the pill is
+        // still narrower than they are. It carries the geometry the number
+        // alone used to have, so a pill at its bare mark_size is no wider than
+        // it ever was.
+        Item {
+            id: pid_text_area
 
             anchors.left: parent.left
             anchors.leftMargin: mark.pid_text_left_margin
             anchors.right: parent.right
             anchors.rightMargin: mark.pid_text_right_margin
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
             clip: true
-            readOnly: true
-            selectByMouse: true
-            persistentSelection: true
-            text: String(VNM_system_window.process_id)
-            color: "white"
-            selectionColor: mark.theme.titlebar
-            selectedTextColor: "white"
-            font.pointSize: 9.5
-            opacity: 0
 
-            Keys.onPressed: (event) => {
-                if (event.key === Qt.Key_C
-                    && (event.modifiers & Qt.ControlModifier)) {
-                    if (pid_edit.selectedText.length === 0) {
-                        pid_edit.selectAll()
+            // Names what the number is. It is a caption, not payload: the
+            // selection Ctrl+C copies stays the bare process ID.
+            Text {
+                id: pid_caption
+                objectName: "vnm_mark_pid_caption"
+
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "PID:"
+                color: "white"
+                font: pid_edit.font
+                opacity: pid_edit.opacity
+            }
+
+            TextInput {
+                id: pid_edit
+                objectName: "vnm_mark_pid_edit"
+
+                property Item previous_focus_item: null
+
+                anchors.left: pid_caption.right
+                anchors.leftMargin: mark.pid_caption_spacing
+                anchors.verticalCenter: parent.verticalCenter
+                readOnly: true
+                selectByMouse: true
+                persistentSelection: true
+                text: String(VNM_system_window.process_id)
+                color: "white"
+                selectionColor: mark.theme.titlebar
+                selectedTextColor: "white"
+                font.pointSize: 9.5
+                opacity: 0
+
+                Keys.onPressed: (event) => {
+                    if (event.key === Qt.Key_C
+                        && (event.modifiers & Qt.ControlModifier)) {
+                        if (pid_edit.selectedText.length === 0) {
+                            pid_edit.selectAll()
+                        }
+                        pid_edit.copy()
+                        mark.request_pid_retract()
+                        event.accepted = true
                     }
-                    pid_edit.copy()
-                    mark.request_pid_retract()
-                    event.accepted = true
                 }
             }
         }
@@ -621,6 +651,13 @@ Item {
             cursorShape: Qt.IBeamCursor
             onPressed: (mouse) => mark.handle_pill_press(mouse)
         }
+    }
+
+    TextMetrics {
+        id: pid_caption_metrics
+
+        font: pid_caption.font
+        text: pid_caption.text
     }
 
     TextMetrics {

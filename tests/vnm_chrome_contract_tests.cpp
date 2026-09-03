@@ -3660,6 +3660,17 @@ VNM_AnimatedMark {
             qAbs(pid_edit->property("opacity").toReal() - 1.0) < 0.01,
             1000);
 
+        // The caption names the number without joining it: it stays a separate
+        // item, so the editor still holds the bare process ID Ctrl+C copies.
+        QObject* pid_caption = find_descendant(
+            root.get(), QStringLiteral("vnm_mark_pid_caption"));
+        QVERIFY(pid_caption != nullptr);
+        QCOMPARE(
+            pid_caption->property("text").toString(), QStringLiteral("PID:"));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(pid_caption->property("opacity").toReal() - 1.0) < 0.01,
+            1000);
+
         QVERIFY(root->setProperty("mark_size", 80.0));
         QTRY_VERIFY_WITH_TIMEOUT(
             nearly_equal(
