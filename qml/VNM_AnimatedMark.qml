@@ -68,6 +68,36 @@ Item {
     signal move_requested()
     signal alt_click_requested()
     signal stay_on_top_change_requested(bool active)
+    signal theme_toggle_requested()
+
+    // A plain click toggles the eye and a double click asks for the theme, so
+    // the first click of a double click has already toggled by the time the
+    // gesture is known. The eye toggle stays synchronous - the morph depends on
+    // its feedback arriving during the press - so the second click puts the eye
+    // back rather than every single click waiting out the double click
+    // interval. What was asked for is remembered instead of read back from
+    // stay_on_top_active, which an owner need not have updated yet.
+    property bool stay_on_top_toggled_by_first_click: false
+    property bool last_stay_on_top_request: false
+
+    function handle_double_click(mouse) {
+        if (mouse.button !== Qt.LeftButton) {
+            return
+        }
+        // Swallowed whatever it turns out to mean: left undelivered the
+        // gesture falls through to the title bar, which reads a double click
+        // as maximize.
+        mouse.accepted = true
+        icon_press_area.stay_on_top_press_candidate = false
+        if (mark.stay_on_top_toggled_by_first_click) {
+            mark.stay_on_top_toggled_by_first_click = false
+            mark.stay_on_top_change_requested(!mark.last_stay_on_top_request)
+        }
+        if (mouse.modifiers !== Qt.NoModifier) {
+            return
+        }
+        mark.theme_toggle_requested()
+    }
 
     function maybe_start_system_move(mouse) {
         if (!move_enabled
@@ -165,8 +195,10 @@ Item {
 
         icon_press_area.system_move_started = false
 
+        mark.stay_on_top_toggled_by_first_click = toggle_stay_on_top
         if (toggle_stay_on_top) {
-            mark.stay_on_top_change_requested(!mark.stay_on_top_active)
+            mark.last_stay_on_top_request = !mark.stay_on_top_active
+            mark.stay_on_top_change_requested(mark.last_stay_on_top_request)
             mouse.accepted = true
         }
         icon_press_area.stay_on_top_press_candidate = false
@@ -521,12 +553,7 @@ Item {
         onReleased: (mouse) => mark.handle_primary_release(mouse)
         onCanceled: mark.cancel_primary_press()
 
-        onDoubleClicked: (mouse) => {
-            if (mouse.button === Qt.LeftButton) {
-                icon_press_area.stay_on_top_press_candidate = false
-                mouse.accepted = true
-            }
-        }
+        onDoubleClicked: (mouse) => mark.handle_double_click(mouse)
     }
 
     Shortcut {

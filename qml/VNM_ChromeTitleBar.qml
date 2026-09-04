@@ -107,6 +107,9 @@ Rectangle {
     signal maximize_toggle_requested()
     signal close_requested()
     signal title_edit_accepted(string title)
+    // A double click on the mark. The chrome has no idea what a theme is; the
+    // owner decides what, if anything, this means.
+    signal theme_toggle_requested()
 
     function non_negative(value) {
         return isFinite(value) ? Math.max(0, value) : 0
@@ -331,6 +334,7 @@ Rectangle {
                     titlebar.Window.window,
                     requested_active)
             }
+            onTheme_toggle_requested: titlebar.theme_toggle_requested()
         }
 
         Label {

@@ -159,6 +159,7 @@ Item {
     signal maximize_toggle_requested()
     signal close_requested()
     signal title_edit_accepted(string title)
+    signal theme_toggle_requested()
 
     function non_negative(value) {
         return isFinite(value) ? Math.max(0, value) : 0
@@ -307,6 +308,7 @@ Item {
         onMaximize_toggle_requested: shell.maximize_toggle_requested()
         onClose_requested: shell.close_requested()
         onTitle_edit_accepted: (title) => shell.title_edit_accepted(title)
+        onTheme_toggle_requested: shell.theme_toggle_requested()
     }
 
     Item {

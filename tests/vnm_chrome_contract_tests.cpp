@@ -932,6 +932,7 @@ Item {
         QVERIFY(has_signal(mark, "move_requested()"));
         QVERIFY(has_signal(mark, "alt_click_requested()"));
         QVERIFY(has_signal(mark, "stay_on_top_change_requested(bool)"));
+        QVERIFY(has_signal(mark, "theme_toggle_requested()"));
 
         QObject* window_button = find_descendant(root.get(), QStringLiteral("window_button"));
         QVERIFY(window_button != nullptr);
@@ -3426,8 +3427,10 @@ Window {
 
         QSignalSpy maximize_spy(titlebar, SIGNAL(maximize_toggle_requested()));
         QSignalSpy topmost_spy(mark, SIGNAL(stay_on_top_change_requested(bool)));
+        QSignalSpy theme_spy(mark, SIGNAL(theme_toggle_requested()));
         QVERIFY(maximize_spy.isValid());
         QVERIFY(topmost_spy.isValid());
+        QVERIFY(theme_spy.isValid());
 
         const QPointF mark_center = mark->mapToScene(
             QPointF(mark->width() / 2.0, mark->height() / 2.0));
@@ -3436,10 +3439,18 @@ Window {
             Qt::LeftButton,
             Qt::NoModifier,
             mark_center.toPoint());
-        QCOMPARE(topmost_spy.count(), 1);
+        // The double click asks for the theme. Its first click had already
+        // toggled the eye - that stays synchronous - so the second undoes it:
+        // two requests whose net effect is none, and the eye ends where it
+        // started. The title bar still must not read it as maximize.
+        QCOMPARE(theme_spy.count(), 1);
+        QCOMPARE(topmost_spy.count(), 2);
+        QCOMPARE(topmost_spy.at(0).at(0).toBool(), true);
+        QCOMPARE(topmost_spy.at(1).at(0).toBool(), false);
         QCOMPARE(maximize_spy.count(), 0);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        QCOMPARE(topmost_spy.count(), 1);
+        QCOMPARE(topmost_spy.count(), 2);
+        QCOMPARE(theme_spy.count(), 1);
         QCOMPARE(maximize_spy.count(), 0);
 
         const QPoint titlebar_background(
@@ -3451,7 +3462,9 @@ Window {
             Qt::NoModifier,
             titlebar_background);
         QCOMPARE(maximize_spy.count(), 1);
-        QCOMPARE(topmost_spy.count(), 1);
+        // Unchanged by the title bar's own double click: still the toggle and
+        // undo the mark's gesture produced.
+        QCOMPARE(topmost_spy.count(), 2);
     }
 
     void animated_mark_eye_resource_is_a_transparent_white_path()
