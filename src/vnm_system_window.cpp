@@ -552,6 +552,25 @@ void vnm_qml_chrome::System_window::sync_alt_modifier_active()
         QGuiApplication::queryKeyboardModifiers().testFlag(Qt::AltModifier));
 }
 
+void vnm_qml_chrome::System_window::show_normal(QWindow* window) const
+{
+    if (!window) {
+        return;
+    }
+
+#ifdef Q_OS_WIN
+    const HWND hwnd = window_hwnd(window);
+    if (window->windowState() == Qt::WindowMaximized && IsZoomed(hwnd)) {
+        // Qt's frameless restore moves the saved rectangle without clearing
+        // the native maximized state set by Windows keyboard shortcuts.
+        ShowWindow(hwnd, SW_RESTORE);
+        return;
+    }
+#endif
+
+    window->showNormal();
+}
+
 bool vnm_qml_chrome::System_window::start_system_move(QWindow* window) const
 {
     if (!window) {

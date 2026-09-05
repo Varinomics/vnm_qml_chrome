@@ -31,6 +31,9 @@ public:
     qint64 process_id() const;
     bool alt_modifier_active() const;
 
+    /** Restore a window, including a frameless window maximized by the OS. */
+    Q_INVOKABLE void show_normal(QWindow* window) const;
+
     Q_INVOKABLE bool start_system_move(QWindow* window) const;
     Q_INVOKABLE bool start_system_resize(QWindow* window, int edges) const;
     /**
