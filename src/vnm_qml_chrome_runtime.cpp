@@ -17,6 +17,7 @@
 // Forward-declare the generated resource initializer so that the linker pulls
 // in vnm_qml_chrome.qrc when this target is consumed as a static library.
 extern int qInitResources_vnm_qml_chrome();
+extern int qInitResources_vnm_qml_chrome_icon_shaders();
 
 namespace {
 
@@ -30,6 +31,7 @@ void ensure_qrc_initialized()
 {
     std::call_once(s_qrc_init_flag, [] {
         qInitResources_vnm_qml_chrome();
+        qInitResources_vnm_qml_chrome_icon_shaders();
     });
 }
 

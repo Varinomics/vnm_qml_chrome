@@ -176,6 +176,322 @@ class Vnm_chrome_contract_tests : public QObject
     Q_OBJECT
 
 private slots:
+    void monochrome_icon_ancestor_motion_is_continuous_and_resnaps()
+    {
+#ifndef Q_MOC_RUN
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        QQuickWindow alternate_window;
+        alternate_window.resize(240, 120);
+
+        QQmlComponent component(&engine);
+        component.setData(
+            QByteArray(R"QML(import QtQuick
+import QtQuick.Window
+import VNM_Chrome 1.0
+
+Window {
+    id: fixture
+
+    width: 240
+    height: 120
+    color: "#202020"
+    property bool animation_pause_active: false
+
+    Item {
+        id: moving_ancestor
+
+        objectName: "moving_ancestor"
+        x: 0.20
+        y: 0.35
+        width: 80
+        height: 64
+
+        Rectangle {
+            id: moving_backdrop
+
+            objectName: "moving_backdrop"
+            anchors.fill: parent
+            color: "#202020"
+        }
+
+        VNM_MonochromeIcon {
+            id: icon
+
+            objectName: "motion_aware_icon"
+            x: 0.17
+            y: 0.29
+            extent: 16
+            source: "qrc:/vnm_qml_chrome/qml/VNM_Chrome/vnm_mark_eye.svg"
+            behind: moving_backdrop
+            scene_animation_running: ancestor_motion.running
+        }
+    }
+
+    Item {
+        id: alternate_ancestor
+
+        objectName: "alternate_ancestor"
+        x: 19.43
+        y: 7.21
+        width: 80
+        height: 64
+
+        Rectangle {
+            objectName: "alternate_backdrop"
+            anchors.fill: parent
+            color: "#202020"
+        }
+    }
+
+    SequentialAnimation {
+        id: ancestor_motion
+
+        objectName: "ancestor_motion"
+
+        NumberAnimation {
+            target: moving_ancestor
+            property: "x"
+            from: 0.20
+            to: 1.60
+            duration: 350
+            easing.type: Easing.Linear
+        }
+
+        ScriptAction {
+            script: fixture.animation_pause_active = true
+        }
+
+        PauseAnimation {
+            duration: 350
+        }
+
+        ScriptAction {
+            script: fixture.animation_pause_active = false
+        }
+
+        NumberAnimation {
+            target: moving_ancestor
+            property: "x"
+            from: 1.60
+            to: 4.40
+            duration: 350
+            easing.type: Easing.Linear
+        }
+    }
+}
+)QML"),
+            QUrl(QStringLiteral("qrc:/tests/subpixel_icon_motion.qml")));
+
+        std::unique_ptr<QObject> fixture(component.create());
+        QVERIFY2(fixture, qPrintable(component_error_string(component)));
+        auto* const window = qobject_cast<QQuickWindow*>(fixture.get());
+        QVERIFY(window);
+        auto* const ancestor = fixture->findChild<QQuickItem*>(
+            QStringLiteral("moving_ancestor"));
+        auto* const alternate_ancestor = fixture->findChild<QQuickItem*>(
+            QStringLiteral("alternate_ancestor"));
+        auto* const alternate_backdrop = fixture->findChild<QQuickItem*>(
+            QStringLiteral("alternate_backdrop"));
+        auto* const icon = fixture->findChild<QQuickItem*>(
+            QStringLiteral("motion_aware_icon"));
+        QObject* const animation = fixture->findChild<QObject*>(
+            QStringLiteral("ancestor_motion"));
+        QVERIFY(ancestor);
+        QVERIFY(alternate_ancestor);
+        QVERIFY(alternate_backdrop);
+        QVERIFY(icon);
+        QVERIFY(animation);
+
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::qWait(100);
+
+        const auto scene_origin = [icon] {
+            QQuickWindow* const owning_window = icon->window();
+            return owning_window
+                ? icon->mapToItem(owning_window->contentItem(), QPointF{})
+                : QPointF{};
+        };
+        const auto rendered_origin = [icon] {
+            QQuickWindow* const owning_window = icon->window();
+            return owning_window
+                ? icon->mapToItem(
+                      owning_window->contentItem(),
+                      icon->property("device_origin_snap").toPointF())
+                : QPointF{};
+        };
+        const double device_pixel_ratio =
+            icon->property("effective_device_pixel_ratio").toDouble();
+        QVERIFY(device_pixel_ratio >= 1.0);
+
+        const QPointF initial_scene_origin = scene_origin();
+        const QPointF initial_snap =
+            icon->property("device_origin_snap").toPointF();
+        const QPointF initial_rendered_origin = rendered_origin();
+        QVERIFY(qAbs(
+            initial_rendered_origin.x() * device_pixel_ratio -
+            qRound(initial_rendered_origin.x() * device_pixel_ratio)) < 0.001);
+        QVERIFY(qAbs(
+            initial_rendered_origin.y() * device_pixel_ratio -
+            qRound(initial_rendered_origin.y() * device_pixel_ratio)) < 0.001);
+
+        QList<QPointF> motion_samples;
+        QObject::connect(
+            window,
+            &QQuickWindow::afterAnimating,
+            window,
+            [&] {
+                if (!animation->property("running").toBool()) {
+                    return;
+                }
+
+                const qreal raw_x = scene_origin().x();
+                if (!motion_samples.isEmpty() &&
+                    qAbs(motion_samples.constLast().x() - raw_x) < 0.000001)
+                {
+                    return;
+                }
+                motion_samples.append(QPointF(raw_x, rendered_origin().x()));
+            });
+
+        QVERIFY(QMetaObject::invokeMethod(animation, "start"));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            icon->property("scene_motion_active").toBool(),
+            1000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            window->property("animation_pause_active").toBool(),
+            1000);
+        QTest::qWait(150);
+        QVERIFY(animation->property("running").toBool());
+        QCOMPARE(
+            icon->property("device_origin_snap").toPointF(),
+            initial_snap);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !animation->property("running").toBool(),
+            3000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !icon->property("scene_motion_active").toBool(),
+            3000);
+        QVERIFY2(
+            motion_samples.size() >= 8,
+            qPrintable(QStringLiteral("captured only %1 motion samples")
+                           .arg(motion_samples.size())));
+
+        for (qsizetype index = 1; index < motion_samples.size(); ++index) {
+            const QPointF previous = motion_samples[index - 1];
+            const QPointF current  = motion_samples[index];
+            QVERIFY2(
+                current.x() > previous.x(),
+                "slow ancestor motion did not remain monotonic");
+            QVERIFY2(
+                qAbs(
+                    (current.y() - previous.y()) -
+                    (current.x() - previous.x())) < 0.001,
+                "the icon introduced a snap step during slow ancestor motion");
+        }
+
+        const QPointF settled_scene_origin = scene_origin();
+        const QPointF settled_snap =
+            icon->property("device_origin_snap").toPointF();
+        const QPointF settled_rendered_origin = rendered_origin();
+        QVERIFY(qAbs(settled_scene_origin.x() - initial_scene_origin.x()) > 4.0);
+        QVERIFY(settled_snap != initial_snap);
+        QVERIFY(qAbs(
+            settled_rendered_origin.x() * device_pixel_ratio -
+            qRound(settled_rendered_origin.x() * device_pixel_ratio)) < 0.001);
+
+        const QPointF pre_move_snap =
+            icon->property("device_origin_snap").toPointF();
+        ancestor->setX(ancestor->x() + 0.31);
+        window->update();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            icon->property("device_origin_snap").toPointF() != pre_move_snap,
+            1000);
+        QVERIFY(!icon->property("scene_motion_active").toBool());
+        const QPointF moved_rendered_origin = rendered_origin();
+        QVERIFY(qAbs(
+            moved_rendered_origin.x() * device_pixel_ratio -
+            qRound(moved_rendered_origin.x() * device_pixel_ratio)) < 0.001);
+
+        const QPointF pre_transform_snap =
+            icon->property("device_origin_snap").toPointF();
+        ancestor->setTransformOrigin(QQuickItem::TopLeft);
+        ancestor->setScale(1.35);
+        ancestor->setRotation(7.5);
+        window->update();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            icon->property("device_origin_snap").toPointF() !=
+                pre_transform_snap,
+            1000);
+        QVERIFY(!icon->property("scene_motion_active").toBool());
+        const QPointF transformed_rendered_origin = rendered_origin();
+        QVERIFY(qAbs(
+            transformed_rendered_origin.x() * device_pixel_ratio -
+            qRound(
+                transformed_rendered_origin.x() * device_pixel_ratio)) <
+            0.001);
+        QVERIFY(qAbs(
+            transformed_rendered_origin.y() * device_pixel_ratio -
+            qRound(
+                transformed_rendered_origin.y() * device_pixel_ratio)) <
+            0.001);
+
+        const QPointF pre_reparent_snap =
+            icon->property("device_origin_snap").toPointF();
+        QVERIFY(icon->setProperty("behind", QVariant::fromValue(
+            alternate_backdrop)));
+        icon->setParentItem(alternate_ancestor);
+        window->update();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            icon->property("device_origin_snap").toPointF() !=
+                pre_reparent_snap,
+            1000);
+        QVERIFY(!icon->property("scene_motion_active").toBool());
+        const QPointF reparented_rendered_origin = rendered_origin();
+        QVERIFY(qAbs(
+            reparented_rendered_origin.x() * device_pixel_ratio -
+            qRound(reparented_rendered_origin.x() * device_pixel_ratio)) <
+            0.001);
+
+        alternate_window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&alternate_window));
+        const QPointF pre_window_change_snap =
+            icon->property("device_origin_snap").toPointF();
+        alternate_ancestor->setX(alternate_ancestor->x() + 0.75);
+        alternate_ancestor->setParentItem(alternate_window.contentItem());
+        alternate_window.update();
+        QTRY_VERIFY_WITH_TIMEOUT(icon->window() == &alternate_window, 1000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            icon->property("device_origin_snap").toPointF() !=
+                pre_window_change_snap,
+            1000);
+        QVERIFY(!icon->property("scene_motion_active").toBool());
+        const double alternate_device_pixel_ratio =
+            alternate_window.devicePixelRatio();
+        const QPointF moved_window_rendered_origin = rendered_origin();
+        QVERIFY(qAbs(
+            moved_window_rendered_origin.x() * alternate_device_pixel_ratio -
+            qRound(
+                moved_window_rendered_origin.x() *
+                alternate_device_pixel_ratio)) < 0.001);
+
+        const QList<double> ratios{1.2, 4.0 / 3.0, 1.25};
+        for (const double ratio : ratios) {
+            QVariant snapped_coordinate;
+            QVERIFY(QMetaObject::invokeMethod(
+                icon,
+                "snapped_scene_coordinate",
+                Q_RETURN_ARG(QVariant, snapped_coordinate),
+                Q_ARG(QVariant, 7.37),
+                Q_ARG(QVariant, ratio)));
+            const double snapped = snapped_coordinate.toDouble();
+            QVERIFY(qAbs(snapped * ratio - qRound(snapped * ratio)) < 0.001);
+            QVERIFY(qAbs((snapped - 7.37) * ratio) <= 0.500001);
+        }
+#endif
+    }
+
     void geometry_helpers_normalize_invalid_dpr()
     {
         using vnm_qml_chrome::normalized_device_pixel_ratio;

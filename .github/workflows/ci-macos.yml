@@ -24,6 +24,7 @@ jobs:
           version: 6.11.1
           arch: clang_64
           cache: true
+          modules: qtshadertools
 
       - name: Configure
         run: >

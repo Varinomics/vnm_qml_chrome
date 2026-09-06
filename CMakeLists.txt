@@ -16,7 +16,8 @@ find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     Quick
     QuickLayouts
     QuickShapes
-    QuickControls2)
+    QuickControls2
+    ShaderTools)
 
 if(PROJECT_IS_TOP_LEVEL)
     set(VNM_QML_CHROME_BUILD_TESTS_DEFAULT ON)
@@ -49,6 +50,18 @@ target_sources(vnm_qml_chrome PRIVATE
     src/vnm_system_window.cpp
     vnm_qml_chrome.qrc
 )
+
+# Keep shader resources inside the archive that the runtime initializes. Qt's
+# static-target helper otherwise exports a separate resource initializer target.
+add_library(vnm_qml_chrome_shader_resources OBJECT)
+target_link_libraries(vnm_qml_chrome_shader_resources PRIVATE Qt6::Core)
+qt_add_shaders(vnm_qml_chrome_shader_resources vnm_qml_chrome_icon_shaders
+    PREFIX "/vnm_qml_chrome/shaders"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+    FILES shaders/monochrome_icon.frag
+)
+target_sources(vnm_qml_chrome PRIVATE
+    $<TARGET_OBJECTS:vnm_qml_chrome_shader_resources>)
 
 target_include_directories(vnm_qml_chrome
     PUBLIC

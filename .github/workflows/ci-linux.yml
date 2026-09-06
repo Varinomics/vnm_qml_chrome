@@ -24,6 +24,7 @@ jobs:
           version: 6.11.1
           arch: linux_gcc_64
           cache: true
+          modules: qtshadertools
 
       - name: Install offscreen platform dependencies
         run: |

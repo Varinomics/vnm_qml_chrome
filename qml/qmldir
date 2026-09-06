@@ -12,3 +12,4 @@ VNM_ChromeSideResizeLayer 1.0 VNM_ChromeSideResizeLayer.qml
 VNM_ChromeWindowFrame 1.0 VNM_ChromeWindowFrame.qml
 VNM_ChromeTitleBar 1.0 VNM_ChromeTitleBar.qml
 VNM_ChromeFrameShell 1.0 VNM_ChromeFrameShell.qml
+VNM_MonochromeIcon 1.0 VNM_MonochromeIcon.qml

@@ -62,3 +62,21 @@ application can apply the accepted value. While editing, the available title
 region is presented as a text box. The Varinomics mark stays in its Alt pose
 unless the always-on-top eye is active; the latched eye intentionally takes
 precedence. The capability is disabled by default.
+
+`VNM_MonochromeIcon` accepts `source`, logical `extent`, `tint`, and `behind`
+(the painted item beneath the icon). It captures the image at three samples
+per device pixel in each axis, preserves the artwork aspect, and composites
+coverage against a live background capture. A background is required for visible
+output because LCD coverage cannot use ordinary single-alpha blending.
+`icon_status`, `shader_status`, and `shader_log` expose loading diagnostics;
+`icon_object_name` names the inner Image without changing its logical size.
+
+The application supplies resolved `lcd_subpixel_order`: 0 for grayscale,
+1/2 for RGB/BGR, or 3/4 for vertical RGB/BGR. Unknown values use grayscale.
+The component does not read a process-global display policy. `track_ancestor_motion`
+selects geometry behavior: true retains the last settled device-grid correction
+through ancestor animation, then commits a final correction; false recalculates
+only on local geometry, parent, or device-ratio changes. Bind
+`scene_animation_running` to the owning geometry animation when ancestor tracking
+is enabled, so pauses retain a continuous correction. This geometry choice is
+independent of grayscale/LCD coverage.
