@@ -31,6 +31,7 @@ Rectangle {
     property bool animated_mark_visible: true
     property bool mark_pid_reveal_enabled: true
     property bool mark_stay_on_top_enabled: true
+    property string mark_shape: "square"
     readonly property bool window_stays_on_top: Window.window
         ? (Window.window.flags & Qt.WindowStaysOnTopHint) !== 0
         : false
@@ -319,6 +320,7 @@ Rectangle {
             alt_reveal_forced: title_editor_frame.visible
             pid_reveal_enabled: titlebar.mark_pid_reveal_enabled
             stay_on_top_enabled: titlebar.mark_stay_on_top_enabled
+            mark_shape: titlebar.mark_shape
             stay_on_top_active: titlebar.window_stays_on_top
             visible: titlebar.animated_mark_visible
             Layout.preferredWidth: animated_mark.pid_pill_active

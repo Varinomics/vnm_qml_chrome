@@ -15,6 +15,7 @@ find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     Qml
     Quick
     QuickLayouts
+    QuickShapes
     QuickControls2)
 
 if(PROJECT_IS_TOP_LEVEL)
@@ -62,6 +63,7 @@ target_link_libraries(vnm_qml_chrome
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickLayouts
+        Qt6::QuickShapes
         Qt6::QuickControls2
 )
 
@@ -107,6 +109,7 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickLayouts
+        Qt6::QuickShapes
         Qt6::QuickControls2
         Qt6::Test
     )

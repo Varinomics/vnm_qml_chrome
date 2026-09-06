@@ -1,10 +1,19 @@
 import QtQuick
+import QtQuick.Shapes
 
 Item {
     id: mark
 
     property VNM_ChromeTheme theme: VNM_ChromeTheme {}
     property real mark_size: 20
+    // "square" is the Varinomics mark: a single orange square in the
+    // bottom-left corner. "cross" halves that square's diagonal and repeats it
+    // in all four corners, leaving a grey cross between them.
+    property string mark_shape: "square"
+    // 0 at rest, 1 once the cross has closed into its circle. Everything the
+    // cross draws is sized from this one number, so its corners joining and the
+    // circle forming are one gesture and cannot drift apart.
+    property real cross_morph: 0
     property bool move_enabled: false
     property bool alt_click_enabled: false
     property int move_drag_threshold: 2
@@ -64,6 +73,22 @@ Item {
     readonly property int alt_reveal_duration: 213
     readonly property real hover_circle_radius_inset: 0.5
     readonly property real hover_circle_x_offset: 0.5
+    readonly property bool cross_shape: mark_shape === "cross"
+    // Halving the Varinomics square's diagonal halves its side. Four of those
+    // leave a grey cross between them, and the arm is whatever they do not
+    // take, so the corners stay exactly the icon's.
+    readonly property real cross_corner_size: mark_size * 193 / 580
+    readonly property real cross_arm_thickness: mark_size - 2 * cross_corner_size
+    // The Varinomics mark tiles: repeated, its grey inverted L becomes a grid
+    // of lines of thickness cross_arm_thickness spaced one mark apart, and the
+    // cross is that same grid seen through a viewport moved half an orange
+    // square diagonally. So the Alt pose does not swap marks, it slides the
+    // viewport back: the bands keep their thickness and travel to the edges,
+    // arriving as the shared mark exactly as the rotation completes. Taken
+    // from the rotation itself rather than animated beside it, because the
+    // move and the turn are one gesture.
+    readonly property real alt_morph:
+        Math.max(0, Math.min(1, icon_rotor.rotation / 45))
 
     signal move_requested()
     signal alt_click_requested()
@@ -477,7 +502,9 @@ Item {
                     Math.abs(orange_mark.scale - 1.0) > 0.01
                     || orange_mark.radius > 0.01
                     || Math.abs(orange_mark.circle_x_offset) > 0.01
-                visible: (!mark.alt_reveal_active || animating) && !mark.pid_pill_active
+                visible: mark.cross_shape
+                    ? !mark.pid_pill_active
+                    : ((!mark.alt_reveal_active || animating) && !mark.pid_pill_active)
 
                 Rectangle {
                     id: grey_mark
@@ -487,6 +514,78 @@ Item {
                     color: mark.theme.mark_grey
                     antialiasing: true
                     opacity: 1
+                    visible: !mark.cross_shape
+                }
+
+                Item {
+                    id: cross_mark
+                    objectName: "vnm_mark_cross"
+
+                    width: parent.width
+                    height: parent.height
+                    x: orange_mark.circle_x_offset
+                    visible: mark.cross_shape
+
+                    // The exterior quad. It is the full mark, so a radius of
+                    // half the mark is exactly a circle rather than the
+                    // clamped rounded square four small squares would give.
+                    Rectangle {
+                        objectName: "vnm_mark_cross_field"
+
+                        anchors.fill: parent
+                        color: mark.theme.mark_orange
+                        radius: mark.mark_size / 2 * mark.cross_morph
+                        antialiasing: true
+                    }
+
+                    // The arms are one path, not two rectangles. Qt
+                    // antialiases a Rectangle's rounded corners but pixel
+                    // snaps its straight edges, so rectangular arms stepped a
+                    // whole pixel at a time as they thinned, however they were
+                    // sized or positioned. A Shape is antialiased along every
+                    // edge it draws, so the arms keep their fractional
+                    // thickness the whole way down. They still only reach the
+                    // straight part of the field's sides, so no grey shows
+                    // outside the circle on the way.
+                    Shape {
+                        id: cross_arms
+                        objectName: "vnm_mark_cross_arms"
+
+                        readonly property real thickness:
+                            mark.cross_arm_thickness * (1 - mark.cross_morph)
+                        // Centred is the cross; the right and top edges are the
+                        // shared mark. Nothing else differs between the two.
+                        readonly property real band_x:
+                            (width - thickness) * (1 + mark.alt_morph) / 2
+                        readonly property real band_y:
+                            (height - thickness) * (1 - mark.alt_morph) / 2
+                        readonly property real band_x_far: band_x + thickness
+                        readonly property real band_y_far: band_y + thickness
+
+                        anchors.fill: parent
+                        preferredRendererType: Shape.CurveRenderer
+
+                        ShapePath {
+                            fillColor: mark.theme.mark_grey
+                            strokeWidth: -1
+
+                            startX: cross_arms.band_x
+                            startY: 0
+
+                            PathLine { x: cross_arms.band_x_far; y: 0 }
+                            PathLine { x: cross_arms.band_x_far; y: cross_arms.band_y }
+                            PathLine { x: cross_arms.width;      y: cross_arms.band_y }
+                            PathLine { x: cross_arms.width;      y: cross_arms.band_y_far }
+                            PathLine { x: cross_arms.band_x_far; y: cross_arms.band_y_far }
+                            PathLine { x: cross_arms.band_x_far; y: cross_arms.height }
+                            PathLine { x: cross_arms.band_x;     y: cross_arms.height }
+                            PathLine { x: cross_arms.band_x;     y: cross_arms.band_y_far }
+                            PathLine { x: 0;                     y: cross_arms.band_y_far }
+                            PathLine { x: 0;                     y: cross_arms.band_y }
+                            PathLine { x: cross_arms.band_x;     y: cross_arms.band_y }
+                            PathLine { x: cross_arms.band_x;     y: 0 }
+                        }
+                    }
                 }
 
                 Rectangle {
@@ -505,6 +604,7 @@ Item {
                     scale: 1
                     transformOrigin: Item.BottomLeft
                     antialiasing: true
+                    visible: !mark.cross_shape
                 }
             }
 
@@ -512,7 +612,9 @@ Item {
                 id: alt_mark
 
                 anchors.fill: parent
-                visible: mark.alt_reveal_active && !normal_mark.animating
+                visible: !mark.cross_shape
+                    && mark.alt_reveal_active
+                    && !normal_mark.animating
 
                 Rectangle {
                     anchors.fill: parent
@@ -749,6 +851,11 @@ Item {
                 target: grey_mark
                 opacity: 0
             }
+
+            PropertyChanges {
+                target: mark
+                cross_morph: 1
+            }
         }
     ]
 
@@ -777,6 +884,13 @@ Item {
                 NumberAnimation {
                     target: orange_mark
                     property: "circle_x_offset"
+                    duration: 330
+                    easing.type: Easing.InOutQuad
+                }
+
+                NumberAnimation {
+                    target: mark
+                    property: "cross_morph"
                     duration: 330
                     easing.type: Easing.InOutQuad
                 }
@@ -818,6 +932,13 @@ Item {
                 NumberAnimation {
                     target: orange_mark
                     property: "circle_x_offset"
+                    duration: 330
+                    easing.type: Easing.InOutQuad
+                }
+
+                NumberAnimation {
+                    target: mark
+                    property: "cross_morph"
                     duration: 330
                     easing.type: Easing.InOutQuad
                 }

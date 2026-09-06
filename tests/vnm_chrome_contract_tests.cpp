@@ -3010,6 +3010,192 @@ VNM_AnimatedMark {
             500);
     }
 
+    void animated_mark_cross_alt_pose_returns_to_the_shared_mark()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+VNM_AnimatedMark {
+    objectName: "animated_mark"
+    mark_size: 20
+    mark_shape: "cross"
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/animated_mark_cross_alt_contract.qml");
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QObject* rotor = find_descendant(root.get(), QStringLiteral("vnm_mark_rotor"));
+        QObject* arms = find_descendant(root.get(), QStringLiteral("vnm_mark_cross_arms"));
+        QObject* alt = find_descendant(root.get(), QStringLiteral("vnm_mark_alt"));
+        QVERIFY(rotor != nullptr);
+        QVERIFY(arms != nullptr);
+
+        const qreal thickness = arms->property("thickness").toReal();
+        const qreal centred = (20.0 - thickness) / 2.0;
+        QCOMPARE(thickness, 20.0 - 2.0 * (20.0 * 193.0 / 580.0));
+
+        // At rest both bands are centred: that is the cross.
+        QCOMPARE(root->property("alt_morph").toReal(), 0.0);
+        QCOMPARE(arms->property("band_x").toReal(), centred);
+        QCOMPARE(arms->property("band_y").toReal(), centred);
+
+        // The Alt pose is the shared Varinomics mark, not a rotated cross. The
+        // mark tiles, so returning to it is only a matter of moving the
+        // viewport back: the bands keep their thickness and travel to the top
+        // and right edges, which is exactly the grey inverted L.
+        QVERIFY(root->setProperty("alt_reveal_forced", true));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(rotor->property("rotation").toReal() - 45.0) < 0.01, 2000);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        QCOMPARE(root->property("alt_morph").toReal(), 1.0);
+        QCOMPARE(arms->property("band_y").toReal(), 0.0);
+        QCOMPARE(arms->property("band_x").toReal(), 20.0 - thickness);
+        // Which leaves the orange exactly the shared mark's square: 193/290 of
+        // the mark, in the bottom-left corner.
+        QCOMPARE(20.0 - thickness, 20.0 * 193.0 / 290.0);
+
+        // The cross never hands over to the flat alt copy, so nothing pops.
+        if (alt != nullptr) {
+            QVERIFY2(!alt->property("visible").toBool(),
+                "A cross must morph into the shared mark, not swap to it.");
+        }
+
+        // And it comes back.
+        QVERIFY(root->setProperty("alt_reveal_forced", false));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(rotor->property("rotation").toReal()) < 0.01, 2000);
+        QCOMPARE(root->property("alt_morph").toReal(), 0.0);
+        QCOMPARE(arms->property("band_x").toReal(), centred);
+    }
+
+    void animated_mark_cross_shape_matches_the_soter_icon()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+Rectangle {
+    objectName: "scene"
+    width: 20
+    height: 20
+    color: "black"
+
+    VNM_AnimatedMark {
+        objectName: "animated_mark"
+        x: 0
+        y: 0
+        mark_size: 20
+        mark_shape: "cross"
+    }
+}
+)";
+
+        QQuickWindow window;
+        window.resize(20, 20);
+
+        std::unique_ptr<QObject> root_object = create_qml_object(
+            engine, qml_source, "qrc:/tests/animated_mark_cross_shape_contract.qml");
+        QVERIFY(root_object != nullptr);
+        auto* root_item = qobject_cast<QQuickItem*>(root_object.get());
+        QVERIFY(root_item != nullptr);
+        root_item->setParentItem(window.contentItem());
+        root_item->setSize(QSizeF(20, 20));
+
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QTest::qWait(50);
+
+        QObject* animated_mark = find_descendant(
+            root_object.get(), QStringLiteral("animated_mark"));
+        QVERIFY(animated_mark != nullptr);
+        QCOMPARE(animated_mark->property("cross_corner_size").toReal(), 20.0 * 193.0 / 580.0);
+        QCOMPARE(animated_mark->property("cross_arm_thickness").toReal(),
+                 20.0 - 2.0 * (20.0 * 193.0 / 580.0));
+
+        // Reading back rendered pixels is deliberate. A Rectangle stores
+        // whatever radius it is given and silently clamps it to half its size
+        // when drawing, so asserting on the property proves nothing about the
+        // shape on screen: four small squares "rounded" into a circle in fact
+        // draw as a rounded square.
+        auto is_orange = [](const QColor& c) {
+            return c.red() > c.green() + 60 && c.red() > c.blue() + 60;
+        };
+        auto is_grey = [](const QColor& c) {
+            return c.red() > 90 && qAbs(c.red() - c.blue()) < 40
+                && qAbs(c.red() - c.green()) < 40;
+        };
+        auto count = [](const QImage& image, auto predicate) {
+            int n = 0;
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    if (predicate(image.pixelColor(x, y))) {
+                        ++n;
+                    }
+                }
+            }
+            return n;
+        };
+
+        QImage resting = window.grabWindow();
+        QVERIFY(!resting.isNull());
+        const qreal scale = qreal(resting.width()) / 20.0;
+        const qreal unit = scale * scale;
+        const qreal corner = 20.0 * 193.0 / 580.0;
+
+        QVERIFY2(qAbs(count(resting, is_orange) / unit - 4.0 * corner * corner) < 40.0,
+            "At rest the cross must read as four corner squares.");
+
+        QVERIFY(animated_mark->setProperty("hover_active", true));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            animated_mark->property("cross_morph").toReal() > 0.35, 3000);
+        QVERIFY(animated_mark->property("cross_morph").toReal() < 0.9);
+
+        QImage midway = window.grabWindow();
+        QVERIFY(!midway.isNull());
+
+        // Nothing square may survive at the extreme corner once the field has
+        // begun to round: neither the orange nor, as mattered here, the grey
+        // behind it.
+        const QColor midway_corner = midway.pixelColor(0, 0);
+        QVERIFY2(!is_orange(midway_corner) && !is_grey(midway_corner),
+            "A corner of the mark is still filled part-way through the morph, "
+            "so something square is showing outside the rounding circle.");
+
+        QTRY_VERIFY_WITH_TIMEOUT(
+            animated_mark->property("cross_morph").toReal() > 0.999, 3000);
+        QTest::qWait(60);
+
+        QImage settled = window.grabWindow();
+        QVERIFY(!settled.isNull());
+        const qreal settled_units = count(settled, is_orange) / unit;
+
+        QVERIFY2(settled_units > 290.0 && settled_units < 345.0,
+            qPrintable(QStringLiteral(
+                "Converged cross covered %1 units. A circle is about 314; the "
+                "rounded square that separately rounded corners would give is "
+                "about 378.").arg(settled_units)));
+        QVERIFY2(count(settled, is_grey) == 0,
+            "The grey arms must be gone once the circle has closed.");
+
+        const QColor probe = settled.pixelColor(int(1.0 * scale), int(4.0 * scale));
+        QVERIFY2(!is_orange(probe),
+            "The settled cross is a rounded square, not a circle: it is filled "
+            "where a circle of radius 10 would not reach.");
+        QVERIFY(is_orange(settled.pixelColor(int(10.0 * scale), int(10.0 * scale))));
+    }
+
     void animated_mark_plain_release_preserves_morph_through_synchronous_feedback()
     {
         QQmlEngine engine;
