@@ -237,14 +237,18 @@ Item {
         void icon.height;
         void icon.behind;
         void icon.device_origin_snap;
-        return behind !== null
-            ? mapToItem(
-                behind,
-                device_origin_snap.x,
-                device_origin_snap.y,
-                width,
-                height)
-            : Qt.rect(0, 0, 0, 0);
+        if (behind === null) {
+            return Qt.rect(0, 0, 0, 0);
+        }
+        // A reveal can move the background while the icon stays in place.
+        void behind.x;
+        void behind.y;
+        return mapToItem(
+            behind,
+            device_origin_snap.x,
+            device_origin_snap.y,
+            width,
+            height);
     }
 
     // An icon's artwork need not be square - sidebars.svg and treemap.svg are
