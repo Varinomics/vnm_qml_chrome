@@ -3,6 +3,7 @@
 #include "vnm_qml_chrome/vnm_chrome_geometry.h"
 #include "vnm_qml_chrome/vnm_native_window_frame.h"
 #include "vnm_qml_chrome/vnm_system_window.h"
+#include "vnm_device_pixel_geometry_item.h"
 
 #include <QDebug>
 #include <QJSEngine>
@@ -59,6 +60,11 @@ void ensure_qml_types_registered()
             1,
             0,
             "VNM_NativeWindowFrame");
+        qmlRegisterType<VNM_Device_pixel_geometry_item>(
+            "VNM_Chrome.Private",
+            1,
+            0,
+            "VNM_DevicePixelGeometryItem");
     });
 }
 

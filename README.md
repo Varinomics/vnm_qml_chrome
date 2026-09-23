@@ -4,6 +4,14 @@
 
 Requires Qt 6.11.1 or newer.
 
+`VNM_Snapped_rectangle` is available from `VNM_Chrome 1.0` for control
+backgrounds that need their painted edges aligned to the device-pixel grid. It
+keeps the requested logical geometry and exposes `color`, `border_color`,
+`border_width`, `radius`, and the independent corner-radius properties.
+`device_pixel_ratio` and `snapping_active` report the active correction state.
+The component supports axis-aligned uniform parent transforms and uses its
+logical geometry when the transform is unsupported.
+
 Set `title_font_family` on `VNM_ChromeTitleBar` or
 `VNM_ChromeFrameShell` to use an application-supplied title font. The caller
 owns loading and packaging that font; `vnm_qml_chrome` only applies the family

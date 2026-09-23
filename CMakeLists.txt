@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(vnm_qml_chrome LANGUAGES CXX VERSION 1.9.0)
+project(vnm_qml_chrome LANGUAGES CXX VERSION 1.10.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,12 +44,20 @@ target_sources(vnm_qml_chrome PRIVATE
     include/vnm_qml_chrome/vnm_qml_chrome_runtime.h
     include/vnm_qml_chrome/vnm_native_window_frame.h
     include/vnm_qml_chrome/vnm_system_window.h
+    src/vnm_device_pixel_geometry_item.h
     src/vnm_chrome_geometry.cpp
+    src/vnm_device_pixel_geometry_item.cpp
     src/vnm_native_window_frame.cpp
     src/vnm_qml_chrome_runtime.cpp
     src/vnm_system_window.cpp
     vnm_qml_chrome.qrc
 )
+
+# Consumers need a feature minimum that remains available after this target is
+# exported or provided by an embedding parent project.
+set_target_properties(vnm_qml_chrome PROPERTIES
+    VNM_QML_CHROME_VERSION "${PROJECT_VERSION}"
+    EXPORT_PROPERTIES VNM_QML_CHROME_VERSION)
 
 # Keep shader resources inside the archive that the runtime initializes. Qt's
 # static-target helper otherwise exports a separate resource initializer target.
@@ -127,6 +135,21 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         Qt6::Test
     )
 
+    add_executable(vnm_chrome_device_pixel_geometry_tests
+        tests/vnm_device_pixel_geometry_tests.cpp
+    )
+    target_include_directories(vnm_chrome_device_pixel_geometry_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(vnm_chrome_device_pixel_geometry_tests PRIVATE
+        vnm_qml_chrome::vnm_qml_chrome
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickShapes
+        Qt6::QuickControls2
+        Qt6::Test
+    )
+
     if(BUILD_TESTING)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -137,6 +160,27 @@ if(VNM_QML_CHROME_BUILD_TESTS)
                 "${vnm_qml_chrome_qt_runtime_path}"
                 "$<TARGET_FILE:vnm_chrome_contract_tests>"
         )
+
+        add_test(
+            NAME vnm_chrome_device_pixel_geometry_tests
+            COMMAND ${CMAKE_COMMAND} -E env
+                ${vnm_qml_chrome_qt_test_environment}
+                "QT_SCALE_FACTOR=1.25"
+                "QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough"
+                "${vnm_qml_chrome_qt_runtime_path}"
+                "$<TARGET_FILE:vnm_chrome_device_pixel_geometry_tests>"
+        )
+
+        add_test(
+            NAME vnm_chrome_snapped_rectangle_resource_recovery_tests
+            COMMAND ${CMAKE_COMMAND} -E env
+                "QT_QUICK_CONTROLS_STYLE=Basic"
+                "${vnm_qml_chrome_qt_runtime_path}"
+                "$<TARGET_FILE:vnm_chrome_device_pixel_geometry_tests>"
+                snapped_rectangle_survives_scene_graph_recreation_without_hover
+        )
+        set_property(TEST vnm_chrome_snapped_rectangle_resource_recovery_tests
+            APPEND PROPERTY LABELS real-platform)
 
         add_test(
             NAME vnm_mark_eye_provenance

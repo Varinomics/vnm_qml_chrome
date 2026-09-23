@@ -1,6 +1,7 @@
 <RCC>
   <qresource prefix="/">
     <file alias="vnm_qml_chrome/qml/VNM_Chrome/VNM_MonochromeIcon.qml">qml/VNM_MonochromeIcon.qml</file>
+    <file alias="vnm_qml_chrome/qml/VNM_Chrome/VNM_Snapped_rectangle.qml">qml/VNM_Snapped_rectangle.qml</file>
     <file alias="vnm_qml_chrome/qml/VNM_Chrome/qmldir">qml/qmldir</file>
     <file alias="vnm_qml_chrome/qml/VNM_Chrome/VNM_ChromeTheme.qml">qml/VNM_ChromeTheme.qml</file>
     <file alias="vnm_qml_chrome/qml/VNM_Chrome/VNM_AnimatedMark.qml">qml/VNM_AnimatedMark.qml</file>
