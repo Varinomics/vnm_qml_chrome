@@ -25,9 +25,17 @@
 #include <QXmlStreamReader>
 #include <QtTest/QTest>
 
+#ifdef Q_OS_WIN
+#include <QAbstractNativeEventFilter>
+#include <windows.h>
+#endif
+
 #include <cmath>
+#include <cstddef>
+#include <cwchar>
 #include <limits>
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -168,6 +176,106 @@ void compare_font_contract(const QFont& actual, const QFont& expected)
     QCOMPARE(actual.letterSpacing(),     expected.letterSpacing());
     QCOMPARE(actual.wordSpacing(),       expected.wordSpacing());
 }
+
+#ifdef Q_OS_WIN
+HWND find_resize_border_window(HWND owner)
+{
+    struct search_t
+    {
+        HWND owner;
+        HWND found;
+    };
+
+    search_t search{owner, nullptr};
+    EnumThreadWindows(
+        GetCurrentThreadId(),
+        [](HWND hwnd, LPARAM data) -> BOOL {
+            auto* search = reinterpret_cast<search_t*>(data);
+            wchar_t class_name[64] = {};
+            GetClassNameW(hwnd, class_name, 64);
+            if (GetWindow(hwnd, GW_OWNER) == search->owner &&
+                std::wcscmp(class_name, L"VNM_NativeWindowResizeBorder") == 0)
+            {
+                search->found = hwnd;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+void verify_resize_border_ring(
+    HWND             ring,
+    HWND             owner,
+    const QMarginsF& logical_margins,
+    qreal            device_pixel_ratio)
+{
+    const int left   = qRound(logical_margins.left()   * device_pixel_ratio);
+    const int top    = qRound(logical_margins.top()    * device_pixel_ratio);
+    const int right  = qRound(logical_margins.right()  * device_pixel_ratio);
+    const int bottom = qRound(logical_margins.bottom() * device_pixel_ratio);
+
+    RECT owner_rect{};
+    RECT ring_rect{};
+    QVERIFY(GetWindowRect(owner, &owner_rect));
+    QVERIFY(GetWindowRect(ring, &ring_rect));
+    QCOMPARE(ring_rect.left,   owner_rect.left   - left);
+    QCOMPARE(ring_rect.top,    owner_rect.top    - top);
+    QCOMPARE(ring_rect.right,  owner_rect.right  + right);
+    QCOMPARE(ring_rect.bottom, owner_rect.bottom + bottom);
+
+    const int width  = ring_rect.right  - ring_rect.left;
+    const int height = ring_rect.bottom - ring_rect.top;
+    HRGN expected = CreateRectRgn(0, 0, width, height);
+    HRGN hole     = CreateRectRgn(left, top, width - right, height - bottom);
+    HRGN actual   = CreateRectRgn(0, 0, 0, 0);
+    CombineRgn(expected, expected, hole, RGN_DIFF);
+    const int  actual_kind = GetWindowRgn(ring, actual);
+    const bool equal       = EqualRgn(actual, expected) != FALSE;
+    DeleteObject(actual);
+    DeleteObject(hole);
+    DeleteObject(expected);
+    QCOMPARE(actual_kind, COMPLEXREGION);
+    QVERIFY(equal);
+}
+
+class Syscommand_recorder final : public QAbstractNativeEventFilter
+{
+public:
+    explicit Syscommand_recorder(HWND target)
+    :
+        m_target(target)
+    {
+        QCoreApplication::instance()->installNativeEventFilter(this);
+    }
+
+    ~Syscommand_recorder() override
+    {
+        QCoreApplication::instance()->removeNativeEventFilter(this);
+    }
+
+    bool nativeEventFilter(const QByteArray&, void* message, qintptr* result) override
+    {
+        const auto* msg = static_cast<const MSG*>(message);
+        if (msg->hwnd != m_target || msg->message != WM_SYSCOMMAND) {
+            return false;
+        }
+
+        m_commands.push_back(msg->wParam);
+        if (result != nullptr) {
+            *result = 0;
+        }
+        return true;
+    }
+
+    const std::vector<WPARAM>& commands() const { return m_commands; }
+
+private:
+    HWND                m_target = nullptr;
+    std::vector<WPARAM> m_commands;
+};
+#endif
 
 } // namespace
 
@@ -1001,37 +1109,147 @@ Window {
 #ifdef Q_OS_WIN
     void native_resize_border_follows_window_geometry()
     {
-        QQuickWindow owner;
-        owner.setFlags(Qt::Window | Qt::FramelessWindowHint);
+        if (QGuiApplication::platformName() != QStringLiteral("windows")) {
+            QSKIP("The native resize border needs real Win32 windows; "
+                  "vnm_chrome_native_resize_border_tests runs it on the windows platform.");
+        }
+
+        // The owner is fully transparent and never takes focus, so the test
+        // leaves the desktop and the active window alone. It stays on top so
+        // that no other window on the desktop covers its ring.
+        QWindow owner;
+        owner.setFlags(
+            Qt::Tool                     |
+            Qt::FramelessWindowHint      |
+            Qt::WindowDoesNotAcceptFocus |
+            Qt::WindowStaysOnTopHint);
+        owner.setOpacity(0.0);
         owner.setGeometry(80, 60, 320, 180);
         owner.show();
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        const QWindowList qt_windows = QGuiApplication::allWindows();
+        const HWND owner_hwnd = reinterpret_cast<HWND>(owner.winId());
 
+        const QMarginsF margins(4.0, 5.0, 6.0, 7.0);
         VNM_NativeWindowFrame frame;
         frame.set_frame_visible(false);
         frame.set_window(&owner);
-        frame.set_resize_outward_margins(QMarginsF(4.0, 5.0, 6.0, 7.0));
+        frame.set_resize_outward_margins(margins);
         frame.set_resize_enabled(true);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
-        QWindow* resize_border = nullptr;
-        for (QWindow* window : QGuiApplication::topLevelWindows()) {
-            if (window->objectName() == QStringLiteral("vnm_native_resize_border") &&
-                window->transientParent() == &owner)
-            {
-                resize_border = window;
-                break;
-            }
+        const HWND ring = find_resize_border_window(owner_hwnd);
+        QVERIFY(ring != nullptr);
+        QVERIFY(IsWindowVisible(ring));
+        QCOMPARE(QGuiApplication::allWindows(), qt_windows);
+
+        // Without a redirection surface nothing is ever drawn. The window is
+        // not layered, so hit testing follows its region rather than pixel
+        // alpha, which would let a transparent ring pass clicks through.
+        const LONG_PTR ex_style = GetWindowLongPtrW(ring, GWL_EXSTYLE);
+        QVERIFY((ex_style & WS_EX_NOREDIRECTIONBITMAP) != 0);
+        QVERIFY((ex_style & WS_EX_NOACTIVATE)          != 0);
+        QVERIFY((ex_style & WS_EX_TOOLWINDOW)          != 0);
+        QVERIFY((ex_style & WS_EX_LAYERED)             == 0);
+
+        verify_resize_border_ring(ring, owner_hwnd, margins, owner.devicePixelRatio());
+        if (QTest::currentTestFailed()) {
+            return;
         }
 
-        QVERIFY(resize_border != nullptr);
-        QVERIFY(resize_border->isVisible());
-        QCOMPARE(resize_border->geometry(), owner.geometry().adjusted(-4, -5, 6, 7));
-        QVERIFY(!resize_border->mask().isEmpty());
+        RECT owner_rect{};
+        QVERIFY(GetWindowRect(owner_hwnd, &owner_rect));
+        const LONG mid_x = (owner_rect.left + owner_rect.right)  / 2;
+        const LONG mid_y = (owner_rect.top  + owner_rect.bottom) / 2;
+        const LONG left   = owner_rect.left - 1;
+        const LONG top    = owner_rect.top  - 1;
+        const LONG right  = owner_rect.right;
+        const LONG bottom = owner_rect.bottom;
+        const auto hit_test = [ring](LONG x, LONG y) {
+            return SendMessageW(ring, WM_NCHITTEST, 0, MAKELPARAM(x, y));
+        };
+        QCOMPARE(hit_test(left,  mid_y),  LRESULT(HTLEFT));
+        QCOMPARE(hit_test(right, mid_y),  LRESULT(HTRIGHT));
+        QCOMPARE(hit_test(mid_x, top),    LRESULT(HTTOP));
+        QCOMPARE(hit_test(mid_x, bottom), LRESULT(HTBOTTOM));
+        QCOMPARE(hit_test(left,  top),    LRESULT(HTTOPLEFT));
+        QCOMPARE(hit_test(right, top),    LRESULT(HTTOPRIGHT));
+        QCOMPARE(hit_test(left,  bottom), LRESULT(HTBOTTOMLEFT));
+        QCOMPARE(hit_test(right, bottom), LRESULT(HTBOTTOMRIGHT));
+        QCOMPARE(hit_test(mid_x, mid_y),  LRESULT(HTTRANSPARENT));
+
+        // SendMessageW bypasses the system's pointer routing. WindowFromPoint
+        // uses it, so the band must reach the ring and the owner's hole not.
+        QCOMPARE(WindowFromPoint(POINT{left,  mid_y}),  ring);
+        QCOMPARE(WindowFromPoint(POINT{right, bottom}), ring);
+        QVERIFY(WindowFromPoint(POINT{mid_x, mid_y}) != ring);
+
+        const HCURSOR previous_cursor = GetCursor();
+        const auto cursor_for = [ring](LRESULT hit) {
+            SendMessageW(
+                ring,
+                WM_SETCURSOR,
+                reinterpret_cast<WPARAM>(ring),
+                MAKELPARAM(hit, WM_MOUSEMOVE));
+            return GetCursor();
+        };
+        const HCURSOR left_cursor        = cursor_for(HTLEFT);
+        const HCURSOR bottom_cursor      = cursor_for(HTBOTTOM);
+        const HCURSOR top_left_cursor    = cursor_for(HTTOPLEFT);
+        const HCURSOR bottom_left_cursor = cursor_for(HTBOTTOMLEFT);
+        SetCursor(previous_cursor);
+        QCOMPARE(left_cursor,        LoadCursorW(nullptr, IDC_SIZEWE));
+        QCOMPARE(bottom_cursor,      LoadCursorW(nullptr, IDC_SIZENS));
+        QCOMPARE(top_left_cursor,    LoadCursorW(nullptr, IDC_SIZENWSE));
+        QCOMPARE(bottom_left_cursor, LoadCursorW(nullptr, IDC_SIZENESW));
+
+        {
+            // A press starts the owner's system resize; the recorder swallows
+            // the command so no modal sizing loop takes over the real mouse.
+            Syscommand_recorder recorder(owner_hwnd);
+            SendMessageW(ring, WM_NCLBUTTONDOWN, HTTOPLEFT, MAKELPARAM(left, top));
+            SendMessageW(ring, WM_NCLBUTTONDOWN, HTRIGHT,   MAKELPARAM(right, mid_y));
+            QTRY_COMPARE(recorder.commands().size(), std::size_t(2));
+            QCOMPARE(recorder.commands(), (std::vector<WPARAM>{0xF004, 0xF002}));
+        }
+
+        owner.setGeometry(100, 90, 400, 220);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        verify_resize_border_ring(ring, owner_hwnd, margins, owner.devicePixelRatio());
+        if (QTest::currentTestFailed()) {
+            return;
+        }
 
         frame.set_resize_enabled(false);
+        QVERIFY(!IsWindowVisible(ring));
+        frame.set_resize_enabled(true);
+        QCOMPARE(find_resize_border_window(owner_hwnd), ring);
+        QVERIFY(IsWindowVisible(ring));
+
+        owner.hide();
+        QVERIFY(!IsWindowVisible(ring));
+        owner.show();
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        QVERIFY(!resize_border->isVisible());
+        QVERIFY(IsWindowVisible(ring));
+
+        frame.set_window(nullptr);
+        QVERIFY(!IsWindow(ring));
+
+        // Destroying the owner destroys its owned ring; the frame must forget it
+        // instead of touching a window handle Windows may already have reused.
+        auto second_owner = std::make_unique<QWindow>();
+        second_owner->setFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus);
+        second_owner->setOpacity(0.0);
+        second_owner->setGeometry(80, 60, 320, 180);
+        second_owner->show();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        frame.set_window(second_owner.get());
+        const HWND second_ring =
+            find_resize_border_window(reinterpret_cast<HWND>(second_owner->winId()));
+        QVERIFY(second_ring != nullptr);
+        second_owner.reset();
+        QVERIFY(!IsWindow(second_ring));
+        QCOMPARE(frame.window(), nullptr);
     }
 #endif
 

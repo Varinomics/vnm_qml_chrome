@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(vnm_qml_chrome LANGUAGES CXX VERSION 1.10.0)
+project(vnm_qml_chrome LANGUAGES CXX VERSION 1.10.1)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -134,6 +134,12 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         Qt6::QuickControls2
         Qt6::Test
     )
+    if(WIN32)
+        target_compile_definitions(vnm_chrome_contract_tests PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN)
+        target_link_libraries(vnm_chrome_contract_tests PRIVATE gdi32 user32)
+    endif()
 
     add_executable(vnm_chrome_device_pixel_geometry_tests
         tests/vnm_device_pixel_geometry_tests.cpp
@@ -181,6 +187,22 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         )
         set_property(TEST vnm_chrome_snapped_rectangle_resource_recovery_tests
             APPEND PROPERTY LABELS real-platform)
+
+        if(WIN32)
+            # The resize ring is a native window, so it needs the windows
+            # platform instead of the offscreen one the contract suite forces.
+            add_test(
+                NAME vnm_chrome_native_resize_border_tests
+                COMMAND ${CMAKE_COMMAND} -E env
+                    "QT_QUICK_CONTROLS_STYLE=Basic"
+                    "${vnm_qml_chrome_qt_runtime_path}"
+                    "$<TARGET_FILE:vnm_chrome_contract_tests>"
+                    -platform windows
+                    native_resize_border_follows_window_geometry
+            )
+            set_property(TEST vnm_chrome_native_resize_border_tests
+                APPEND PROPERTY LABELS real-platform)
+        endif()
 
         add_test(
             NAME vnm_mark_eye_provenance

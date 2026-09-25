@@ -1,23 +1,17 @@
 #include "vnm_qml_chrome/vnm_native_window_frame.h"
 
 #include <QEvent>
+#include <QGuiApplication>
 #include <QScreen>
 #include <QWindow>
 
 #ifdef Q_OS_WIN
-#include <QMouseEvent>
-#include <QQuickWindow>
-#include <QRegion>
-#include <QSurfaceFormat>
 #include <windows.h>
+#include <windowsx.h>
 #endif
 
 #include <algorithm>
 #include <cmath>
-
-#ifdef Q_OS_WIN
-#include <mutex>
-#endif
 
 namespace {
 
@@ -28,117 +22,12 @@ qreal non_negative_extent(qreal extent)
 
 #ifdef Q_OS_WIN
 
-constexpr wchar_t k_native_frame_window_class[] = L"VNM_NativeWindowFrameEdge";
-constexpr int k_top_edge                        = 0;
-constexpr int k_bottom_edge                     = 1;
-constexpr int k_left_edge                       = 2;
-constexpr int k_right_edge                      = 3;
-
-Qt::CursorShape resize_cursor(Qt::Edges edges)
-{
-    if (edges == (Qt::LeftEdge | Qt::TopEdge) ||
-        edges == (Qt::RightEdge | Qt::BottomEdge))
-    {
-        return Qt::SizeFDiagCursor;
-    }
-    if (edges == (Qt::RightEdge | Qt::TopEdge) ||
-        edges == (Qt::LeftEdge | Qt::BottomEdge))
-    {
-        return Qt::SizeBDiagCursor;
-    }
-    if (edges.testFlag(Qt::LeftEdge) || edges.testFlag(Qt::RightEdge)) {
-        return Qt::SizeHorCursor;
-    }
-    return Qt::SizeVerCursor;
-}
-
-class Resize_border_window final : public QQuickWindow
-{
-public:
-    explicit Resize_border_window(QWindow* owner)
-    :
-        m_owner(owner)
-    {
-        QSurfaceFormat alpha_format = format();
-        alpha_format.setAlphaBufferSize(8);
-        setFormat(alpha_format);
-        setColor(Qt::transparent);
-        setFlags(
-            Qt::Tool |
-            Qt::FramelessWindowHint |
-            Qt::WindowDoesNotAcceptFocus |
-            Qt::NoDropShadowWindowHint);
-        setObjectName(QStringLiteral("vnm_native_resize_border"));
-        setTransientParent(owner);
-    }
-
-    bool update_geometry(const QMarginsF& margins)
-    {
-        if (!m_owner) {
-            return false;
-        }
-
-        const int left   = qRound(margins.left());
-        const int top    = qRound(margins.top());
-        const int right  = qRound(margins.right());
-        const int bottom = qRound(margins.bottom());
-        if (left + top + right + bottom == 0) {
-            return false;
-        }
-
-        const QRect owner_geometry = m_owner->geometry();
-        setGeometry(owner_geometry.adjusted(-left, -top, right, bottom));
-
-        m_inner_rect = QRect(left, top, owner_geometry.width(), owner_geometry.height());
-        const QRegion outside_ring = QRegion(QRect(QPoint(0, 0), size()))
-            .subtracted(QRegion(m_inner_rect));
-        if (mask() != outside_ring) {
-            setMask(outside_ring);
-        }
-        return !outside_ring.isEmpty();
-    }
-
-protected:
-    void mouseMoveEvent(QMouseEvent* event) override
-    {
-        const Qt::Edges edges = resize_edges(event->position());
-        if (edges != Qt::Edges{}) {
-            setCursor(resize_cursor(edges));
-        }
-        event->accept();
-    }
-
-    void mousePressEvent(QMouseEvent* event) override
-    {
-        const Qt::Edges edges = resize_edges(event->position());
-        if (event->button() == Qt::LeftButton && m_owner && edges != Qt::Edges{}) {
-            m_owner->startSystemResize(edges);
-        }
-        event->accept();
-    }
-
-private:
-    Qt::Edges resize_edges(const QPointF& position) const
-    {
-        Qt::Edges edges;
-        if (position.x() < m_inner_rect.left()) {
-            edges |= Qt::LeftEdge;
-        }
-        if (position.x() >= m_inner_rect.left() + m_inner_rect.width()) {
-            edges |= Qt::RightEdge;
-        }
-        if (position.y() < m_inner_rect.top()) {
-            edges |= Qt::TopEdge;
-        }
-        if (position.y() >= m_inner_rect.top() + m_inner_rect.height()) {
-            edges |= Qt::BottomEdge;
-        }
-        return edges;
-    }
-
-    QPointer<QWindow> m_owner;
-    QRect m_inner_rect;
-};
+constexpr wchar_t k_native_frame_window_class[]  = L"VNM_NativeWindowFrameEdge";
+constexpr wchar_t k_resize_border_window_class[] = L"VNM_NativeWindowResizeBorder";
+constexpr int k_top_edge                         = 0;
+constexpr int k_bottom_edge                      = 1;
+constexpr int k_left_edge                        = 2;
+constexpr int k_right_edge                       = 3;
 
 HWND as_hwnd(void* handle)
 {
@@ -191,26 +80,119 @@ LRESULT CALLBACK native_frame_window_proc(
     return DefWindowProcW(hwnd, message, w_param, l_param);
 }
 
+// The ring answers with the system's sizing-border codes so Windows supplies the
+// standard resize cursors; a press is still redirected to resize the owner.
+LRESULT resize_border_hit_test(HWND resize_border, POINT screen_point)
+{
+    RECT owner_rect{};
+    GetWindowRect(GetWindow(resize_border, GW_OWNER), &owner_rect);
+
+    const bool left   = screen_point.x <  owner_rect.left;
+    const bool right  = screen_point.x >= owner_rect.right;
+    const bool top    = screen_point.y <  owner_rect.top;
+    const bool bottom = screen_point.y >= owner_rect.bottom;
+    if (top) {
+        return left ? HTTOPLEFT : (right ? HTTOPRIGHT : HTTOP);
+    }
+    if (bottom) {
+        return left ? HTBOTTOMLEFT : (right ? HTBOTTOMRIGHT : HTBOTTOM);
+    }
+    if (left) {
+        return HTLEFT;
+    }
+    if (right) {
+        return HTRIGHT;
+    }
+
+    // The owner grew before the ring's region caught up; the owner takes it.
+    return HTTRANSPARENT;
+}
+
+Qt::Edges resize_edges(WPARAM hit_test)
+{
+    switch (hit_test) {
+        case HTLEFT:        return Qt::LeftEdge;
+        case HTRIGHT:       return Qt::RightEdge;
+        case HTTOP:         return Qt::TopEdge;
+        case HTBOTTOM:      return Qt::BottomEdge;
+        case HTTOPLEFT:     return Qt::TopEdge    | Qt::LeftEdge;
+        case HTTOPRIGHT:    return Qt::TopEdge    | Qt::RightEdge;
+        case HTBOTTOMLEFT:  return Qt::BottomEdge | Qt::LeftEdge;
+        case HTBOTTOMRIGHT: return Qt::BottomEdge | Qt::RightEdge;
+        default:            return {};
+    }
+}
+
+LRESULT CALLBACK resize_border_window_proc(
+    HWND hwnd,
+    UINT message,
+    WPARAM w_param,
+    LPARAM l_param)
+{
+    switch (message) {
+        case WM_NCHITTEST:
+            return resize_border_hit_test(
+                hwnd,
+                POINT{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)});
+
+        case WM_MOUSEACTIVATE:
+            // The owner keeps activation while the user grabs its resize ring.
+            return MA_NOACTIVATE;
+
+        case WM_NCLBUTTONDOWN:
+        case WM_NCLBUTTONDBLCLK: {
+            // Default handling would size or snap the ring itself.
+            auto* frame = reinterpret_cast<VNM_NativeWindowFrame*>(
+                GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            frame->window()->startSystemResize(resize_edges(w_param));
+            return 0;
+        }
+
+        default:
+            break;
+    }
+
+    return DefWindowProcW(hwnd, message, w_param, l_param);
+}
+
+ATOM register_window_class(const wchar_t* class_name, WNDPROC window_proc)
+{
+    WNDCLASSEXW window_class{};
+    window_class.cbSize        = sizeof(window_class);
+    window_class.lpfnWndProc   = window_proc;
+    window_class.hInstance     = GetModuleHandleW(nullptr);
+    window_class.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.lpszClassName = class_name;
+
+    const ATOM window_class_atom = RegisterClassExW(&window_class);
+    if (window_class_atom == 0 && GetLastError() == ERROR_CLASS_ALREADY_EXISTS) {
+        return 1;
+    }
+    return window_class_atom;
+}
+
 ATOM ensure_native_frame_window_class()
 {
-    static std::once_flag register_flag;
-    static ATOM window_class_atom = 0;
-
-    std::call_once(register_flag, [] {
-        WNDCLASSEXW window_class{};
-        window_class.cbSize        = sizeof(window_class);
-        window_class.lpfnWndProc   = native_frame_window_proc;
-        window_class.hInstance     = GetModuleHandleW(nullptr);
-        window_class.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
-        window_class.lpszClassName = k_native_frame_window_class;
-
-        window_class_atom = RegisterClassExW(&window_class);
-        if (window_class_atom == 0 && GetLastError() == ERROR_CLASS_ALREADY_EXISTS) {
-            window_class_atom = 1;
-        }
-    });
-
+    static const ATOM window_class_atom =
+        register_window_class(k_native_frame_window_class, native_frame_window_proc);
     return window_class_atom;
+}
+
+ATOM ensure_resize_border_window_class()
+{
+    static const ATOM window_class_atom =
+        register_window_class(k_resize_border_window_class, resize_border_window_proc);
+    return window_class_atom;
+}
+
+// Windows destroys an owned window together with its owner and may later hand
+// the same handle to an unrelated window, so a stored handle is checked first.
+bool is_resize_border_window_of(void* handle, const VNM_NativeWindowFrame* frame)
+{
+    HWND hwnd = as_hwnd(handle);
+    return
+        hwnd && IsWindow(hwnd) &&
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA) == reinterpret_cast<LONG_PTR>(frame);
 }
 
 #endif
@@ -481,16 +463,14 @@ bool VNM_NativeWindowFrame::should_use_native_resize_border() const
 
 void* VNM_NativeWindowFrame::window_handle() const
 {
-    if (!m_window) {
+    // Only the windows platform plugin backs a QWindow with an HWND. Other
+    // plugins, such as offscreen, hand out small identifiers that IsWindow can
+    // mistake for the handle of an unrelated window.
+    if (!m_window || QGuiApplication::platformName() != QStringLiteral("windows")) {
         return nullptr;
     }
 
-    HWND hwnd = reinterpret_cast<HWND>(m_window->winId());
-    if (!hwnd || !IsWindow(hwnd)) {
-        return nullptr;
-    }
-
-    return from_hwnd(hwnd);
+    return from_hwnd(reinterpret_cast<HWND>(m_window->winId()));
 }
 
 bool VNM_NativeWindowFrame::apply_native_frame()
@@ -671,29 +651,102 @@ int VNM_NativeWindowFrame::frame_width_px(void* parent_window_handle) const
 
 void VNM_NativeWindowFrame::update_resize_border_window()
 {
-    if (!should_use_native_resize_border()) {
-        if (m_resize_border_window) {
-            m_resize_border_window->hide();
-        }
+    void* owner_handle = should_use_native_resize_border() ? window_handle() : nullptr;
+    if (!owner_handle || !ensure_resize_border_window(owner_handle)) {
+        hide_resize_border_window();
         return;
     }
 
-    if (!m_resize_border_window) {
-        m_resize_border_window = new Resize_border_window(m_window);
-    }
-
-    auto* resize_border = static_cast<Resize_border_window*>(m_resize_border_window);
-    if (!resize_border->update_geometry(m_resize_outward_margins)) {
-        resize_border->hide();
+    const qreal dpr  = m_window->devicePixelRatio();
+    const int left   = qRound(m_resize_outward_margins.left()   * dpr);
+    const int top    = qRound(m_resize_outward_margins.top()    * dpr);
+    const int right  = qRound(m_resize_outward_margins.right()  * dpr);
+    const int bottom = qRound(m_resize_outward_margins.bottom() * dpr);
+    if (left + top + right + bottom == 0) {
+        hide_resize_border_window();
         return;
     }
 
-    resize_border->show();
+    RECT owner_rect{};
+    GetWindowRect(as_hwnd(owner_handle), &owner_rect);
+    const int width  = owner_rect.right  - owner_rect.left + left + right;
+    const int height = owner_rect.bottom - owner_rect.top  + top  + bottom;
+
+    HWND hwnd    = as_hwnd(m_resize_border_window);
+    HRGN ring    = CreateRectRgn(0, 0, width, height);
+    HRGN hole    = CreateRectRgn(left, top, width - right, height - bottom);
+    HRGN current = CreateRectRgn(0, 0, 0, 0);
+    CombineRgn(ring, ring, hole, RGN_DIFF);
+    const bool region_unchanged =
+        GetWindowRgn(hwnd, current) != ERROR && EqualRgn(current, ring);
+    DeleteObject(current);
+    DeleteObject(hole);
+    if (region_unchanged) {
+        DeleteObject(ring);
+    }
+    else {
+        // The window takes ownership of the region handle.
+        SetWindowRgn(hwnd, ring, TRUE);
+    }
+
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        owner_rect.left - left,
+        owner_rect.top  - top,
+        width,
+        height,
+        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+}
+
+bool VNM_NativeWindowFrame::ensure_resize_border_window(void* owner_window_handle)
+{
+    if (!is_resize_border_window_of(m_resize_border_window, this)) {
+        m_resize_border_window = nullptr;
+    }
+    if (m_resize_border_window) {
+        return true;
+    }
+    if (ensure_resize_border_window_class() == 0) {
+        return false;
+    }
+
+    // Without a redirection surface the ring is never drawn and never needs a
+    // graphics device, while its window region still receives hit tests.
+    HWND hwnd = CreateWindowExW(
+        WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        k_resize_border_window_class,
+        L"",
+        WS_POPUP,
+        0,
+        0,
+        0,
+        0,
+        as_hwnd(owner_window_handle),
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
+    if (!hwnd) {
+        return false;
+    }
+
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    m_resize_border_window = from_hwnd(hwnd);
+    return true;
+}
+
+void VNM_NativeWindowFrame::hide_resize_border_window()
+{
+    if (is_resize_border_window_of(m_resize_border_window, this)) {
+        ShowWindow(as_hwnd(m_resize_border_window), SW_HIDE);
+    }
 }
 
 void VNM_NativeWindowFrame::destroy_resize_border_window()
 {
-    delete m_resize_border_window;
+    if (is_resize_border_window_of(m_resize_border_window, this)) {
+        DestroyWindow(as_hwnd(m_resize_border_window));
+    }
     m_resize_border_window = nullptr;
 }
 

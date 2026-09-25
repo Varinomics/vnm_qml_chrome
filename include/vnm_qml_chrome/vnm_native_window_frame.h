@@ -13,18 +13,18 @@
 #include <array>
 #endif
 
-class QQuickWindow;
-
 /**
  * @brief Optional native border controller for frameless QWindow instances.
  *
  * On Windows, the controller can draw a four-edge child-window border and add
- * an invisible resize ring outside the attached frameless window. The visual
- * frame is active only while frame_visible is true, frame_width is positive,
- * and frame_color is valid and fully opaque. On other platforms, active remains
- * false so callers can use their QML fallback frame. Window-state policy remains
- * with the caller: fullscreen, maximized, or other state rules must be encoded
- * in frame_visible and resize_enabled.
+ * an invisible resize ring outside the attached frameless window. The ring is a
+ * native window without a rendering surface, so it never owns a graphics
+ * device, swapchain, or render thread. The visual frame is active only while
+ * frame_visible is true, frame_width is positive, and frame_color is valid and
+ * fully opaque. On other platforms, active remains false so callers can use
+ * their QML fallback frame. Window-state policy remains with the caller:
+ * fullscreen, maximized, or other state rules must be encoded in frame_visible
+ * and resize_enabled.
  */
 class VNM_NativeWindowFrame : public QObject
 {
@@ -97,10 +97,12 @@ private:
     void repaint_edge_windows();
     int frame_width_px(void* parent_window_handle) const;
     void update_resize_border_window();
+    bool ensure_resize_border_window(void* owner_window_handle);
+    void hide_resize_border_window();
     void destroy_resize_border_window();
 
     std::array<void*, 4> m_edge_windows{};
-    QQuickWindow*        m_resize_border_window = nullptr;
+    void*                m_resize_border_window = nullptr;
 #endif
 
     QPointer<QWindow>               m_window;
