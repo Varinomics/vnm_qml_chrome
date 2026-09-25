@@ -113,10 +113,13 @@ if(VNM_QML_CHROME_BUILD_TESTS)
             "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:Qt6::Core>:$ENV{LD_LIBRARY_PATH}")
     endif()
 
+    # Without a console, QtTest on Windows sends its report to
+    # OutputDebugString, so CTest would capture nothing, not even a failure.
     set(vnm_qml_chrome_qt_test_environment
         "QT_QPA_PLATFORM=offscreen"
         "QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
         "QT_QUICK_CONTROLS_STYLE=Basic"
+        "QT_FORCE_STDERR_LOGGING=1"
     )
 
     add_executable(vnm_chrome_contract_tests
@@ -177,31 +180,40 @@ if(VNM_QML_CHROME_BUILD_TESTS)
                 "$<TARGET_FILE:vnm_chrome_device_pixel_geometry_tests>"
         )
 
-        add_test(
-            NAME vnm_chrome_snapped_rectangle_resource_recovery_tests
-            COMMAND ${CMAKE_COMMAND} -E env
-                "QT_QUICK_CONTROLS_STYLE=Basic"
-                "${vnm_qml_chrome_qt_runtime_path}"
-                "$<TARGET_FILE:vnm_chrome_device_pixel_geometry_tests>"
-                snapped_rectangle_survives_scene_graph_recreation_without_hover
-        )
-        set_property(TEST vnm_chrome_snapped_rectangle_resource_recovery_tests
-            APPEND PROPERTY LABELS real-platform)
-
         if(WIN32)
-            # The resize ring is a native window, so it needs the windows
-            # platform instead of the offscreen one the contract suite forces.
+            # These tests show real windows, so -platform windows overrides an
+            # inherited QT_QPA_PLATFORM=offscreen. CTest starts them directly:
+            # cmake -E env would start them with STARTF_USESHOWWINDOW and
+            # SW_HIDE, which Windows applies to the first ShowWindow call, so
+            # the first window a test shows would never be exposed.
+            string(REPLACE ";" "\;" vnm_qml_chrome_escaped_path "$ENV{PATH}")
+            set(vnm_qml_chrome_real_platform_test_environment
+                "QT_QUICK_CONTROLS_STYLE=Basic"
+                "QT_FORCE_STDERR_LOGGING=1"
+                "PATH=$<TARGET_FILE_DIR:Qt6::Core>\;${vnm_qml_chrome_escaped_path}"
+            )
+
+            add_test(
+                NAME vnm_chrome_snapped_rectangle_resource_recovery_tests
+                COMMAND
+                    "$<TARGET_FILE:vnm_chrome_device_pixel_geometry_tests>"
+                    -platform windows
+                    snapped_rectangle_survives_scene_graph_recreation_without_hover
+            )
             add_test(
                 NAME vnm_chrome_native_resize_border_tests
-                COMMAND ${CMAKE_COMMAND} -E env
-                    "QT_QUICK_CONTROLS_STYLE=Basic"
-                    "${vnm_qml_chrome_qt_runtime_path}"
+                COMMAND
                     "$<TARGET_FILE:vnm_chrome_contract_tests>"
                     -platform windows
                     native_resize_border_follows_window_geometry
             )
-            set_property(TEST vnm_chrome_native_resize_border_tests
-                APPEND PROPERTY LABELS real-platform)
+            set_tests_properties(
+                vnm_chrome_snapped_rectangle_resource_recovery_tests
+                vnm_chrome_native_resize_border_tests
+                PROPERTIES
+                    ENVIRONMENT "${vnm_qml_chrome_real_platform_test_environment}"
+                    LABELS real-platform
+            )
         endif()
 
         add_test(
