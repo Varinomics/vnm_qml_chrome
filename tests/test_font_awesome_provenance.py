@@ -10,7 +10,10 @@ from xml.etree import ElementTree
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = REPOSITORY_ROOT / "THIRD_PARTY/font_awesome_eye.toml"
+MANIFEST_PATHS = (
+    REPOSITORY_ROOT / "THIRD_PARTY/font_awesome_eye.toml",
+    REPOSITORY_ROOT / "THIRD_PARTY/font_awesome_circle_xmark.toml",
+)
 
 
 def sha256(data: bytes) -> str:
@@ -22,9 +25,9 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def load_manifest() -> dict[str, object]:
+def load_manifest(manifest_path: Path) -> dict[str, object]:
     manifest = {}
-    for line_number, line in enumerate(MANIFEST_PATH.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -47,12 +50,6 @@ def verify_manifest(manifest: dict[str, object]) -> bytes:
     require(sha256(output_data) == manifest["output_sha256"], "Output hash drifted.")
     require(len(output_data) == manifest["output_size"], "Output size drifted.")
 
-    recipe_path = REPOSITORY_ROOT / str(manifest["recipe"])
-    require(
-        sha256(recipe_path.read_bytes()) == manifest["recipe_sha256"],
-        "Recipe hash drifted.",
-    )
-
     license_path = REPOSITORY_ROOT / str(manifest["license_text"])
     require(
         sha256(license_path.read_bytes()) == manifest["license_text_sha256"],
@@ -69,12 +66,24 @@ def verify_svg(manifest: dict[str, object], output_data: bytes) -> None:
     paths = root.findall(f"{namespace}path")
     require(root.attrib.get("viewBox") == manifest["view_box"], "viewBox drifted.")
     require(len(paths) == 1, "Expected exactly one SVG path.")
-    require(paths[0].attrib.get("fill") == "#ffffff", "Product fill must stay white.")
     geometry = paths[0].attrib.get("d", "").encode("utf-8")
     require(sha256(geometry) == manifest["geometry_sha256"], "Path geometry drifted.")
 
 
+# The verified output hash makes equal manifest hashes prove the shipped file
+# is the pinned upstream SVG byte for byte.
+def verify_unmodified_upstream(manifest: dict[str, object]) -> None:
+    require(manifest["output_sha256"] == manifest["input_sha256"], "Output is not upstream.")
+    require(manifest["output_size"] == manifest["input_size"], "Output size is not upstream.")
+
+
 def verify_recipe_twice(manifest: dict[str, object], output_data: bytes) -> None:
+    recipe_path = REPOSITORY_ROOT / str(manifest["recipe"])
+    require(
+        sha256(recipe_path.read_bytes()) == manifest["recipe_sha256"],
+        "Recipe hash drifted.",
+    )
+
     product_fill = b'fill="#ffffff"'
     upstream_fill = b'fill="currentColor"'
     require(output_data.count(product_fill) == 1, "Expected one product fill.")
@@ -82,10 +91,9 @@ def verify_recipe_twice(manifest: dict[str, object], output_data: bytes) -> None
     require(sha256(upstream_data) == manifest["input_sha256"], "Upstream hash drifted.")
     require(len(upstream_data) == manifest["input_size"], "Upstream size drifted.")
 
-    recipe_path = REPOSITORY_ROOT / str(manifest["recipe"])
     with tempfile.TemporaryDirectory() as temporary_directory:
         temporary_root = Path(temporary_directory)
-        input_path = temporary_root / "eye.svg"
+        input_path = temporary_root / "upstream.svg"
         first_output = temporary_root / "first.svg"
         second_output = temporary_root / "second.svg"
         input_path.write_bytes(upstream_data)
@@ -101,11 +109,16 @@ def verify_recipe_twice(manifest: dict[str, object], output_data: bytes) -> None
 
 
 def main() -> None:
-    manifest = load_manifest()
-    output_data = verify_manifest(manifest)
-    verify_svg(manifest, output_data)
-    verify_recipe_twice(manifest, output_data)
-    print("Font Awesome eye provenance is reproducible and internally consistent.")
+    for manifest_path in MANIFEST_PATHS:
+        manifest = load_manifest(manifest_path)
+        output_data = verify_manifest(manifest)
+        verify_svg(manifest, output_data)
+        # A manifest names a recipe exactly when the shipped SVG was modified.
+        if "recipe" in manifest:
+            verify_recipe_twice(manifest, output_data)
+        else:
+            verify_unmodified_upstream(manifest)
+    print("Font Awesome icon provenance is reproducible and internally consistent.")
 
 
 if __name__ == "__main__":

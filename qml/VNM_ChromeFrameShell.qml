@@ -31,6 +31,7 @@ Item {
     property alias title: titlebar.title
     property alias title_font_family: titlebar.title_font_family
     property alias title_editing_enabled: titlebar.title_editing_enabled
+    property alias title_reset_available: titlebar.title_reset_available
     property alias active: titlebar.active
     property alias maximized: titlebar.maximized
     property alias activity_marker_text: titlebar.activity_marker_text
@@ -160,6 +161,7 @@ Item {
     signal maximize_toggle_requested()
     signal close_requested()
     signal title_edit_accepted(string title)
+    signal title_reset_requested()
     signal theme_toggle_requested()
 
     function non_negative(value) {
@@ -309,6 +311,7 @@ Item {
         onMaximize_toggle_requested: shell.maximize_toggle_requested()
         onClose_requested: shell.close_requested()
         onTitle_edit_accepted: (title) => shell.title_edit_accepted(title)
+        onTitle_reset_requested: shell.title_reset_requested()
         onTheme_toggle_requested: shell.theme_toggle_requested()
     }
 

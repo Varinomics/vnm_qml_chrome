@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(vnm_qml_chrome LANGUAGES CXX VERSION 1.10.1)
+project(vnm_qml_chrome LANGUAGES CXX VERSION 1.11.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -217,10 +217,10 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         endif()
 
         add_test(
-            NAME vnm_mark_eye_provenance
+            NAME vnm_font_awesome_provenance
             COMMAND
                 "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_font_awesome_eye_provenance.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_font_awesome_provenance.py"
         )
     endif()
 endif()

@@ -1557,6 +1557,7 @@ Item {
             "title",
             "title_font_family",
             "title_editing_enabled",
+            "title_reset_available",
             "active",
             "maximized",
             "resize_enabled",
@@ -1587,6 +1588,7 @@ Item {
         QVERIFY(has_signal(titlebar, "maximize_toggle_requested()"));
         QVERIFY(has_signal(titlebar, "close_requested()"));
         QVERIFY(has_signal(titlebar, "title_edit_accepted(QString)"));
+        QVERIFY(has_signal(titlebar, "title_reset_requested()"));
     }
 
     void frame_shell_is_importable_from_qrc_and_exposes_contract()
@@ -1647,6 +1649,7 @@ Item {
             "title",
             "title_font_family",
             "title_editing_enabled",
+            "title_reset_available",
             "active",
             "maximized",
             "activity_marker_text",
@@ -1677,6 +1680,7 @@ Item {
         QVERIFY(has_signal(shell, "maximize_toggle_requested()"));
         QVERIFY(has_signal(shell, "close_requested()"));
         QVERIFY(has_signal(shell, "title_edit_accepted(QString)"));
+        QVERIFY(has_signal(shell, "title_reset_requested()"));
 
         QObject* shell_titlebar = find_descendant(
             root.get(),
@@ -2050,6 +2054,9 @@ Item {
 
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Shell Commands"));
         QCOMPARE(titlebar->property("title_editing_enabled").toBool(), true);
+        QCOMPARE(titlebar->property("title_reset_available").toBool(), false);
+        QVERIFY(shell->setProperty("title_reset_available", true));
+        QCOMPARE(titlebar->property("title_reset_available").toBool(), true);
         QCOMPARE(titlebar->property("active").toBool(), false);
         QCOMPARE(titlebar->property("maximized").toBool(), true);
         QCOMPARE(shell->property("mark_pid_reveal_enabled").toBool(), true);
@@ -2090,12 +2097,14 @@ Item {
         QSignalSpy maximize_spy(shell, SIGNAL(maximize_toggle_requested()));
         QSignalSpy close_spy(shell, SIGNAL(close_requested()));
         QSignalSpy title_edit_spy(shell, SIGNAL(title_edit_accepted(QString)));
+        QSignalSpy title_reset_spy(shell, SIGNAL(title_reset_requested()));
         QVERIFY(move_spy.isValid());
         QVERIFY(resize_spy.isValid());
         QVERIFY(minimize_spy.isValid());
         QVERIFY(maximize_spy.isValid());
         QVERIFY(close_spy.isValid());
         QVERIFY(title_edit_spy.isValid());
+        QVERIFY(title_reset_spy.isValid());
 
         QVERIFY(QMetaObject::invokeMethod(titlebar, "move_requested"));
         QVERIFY(QMetaObject::invokeMethod(
@@ -2109,6 +2118,7 @@ Item {
             titlebar,
             "title_edit_accepted",
             Q_ARG(QString, QStringLiteral("User title"))));
+        QVERIFY(QMetaObject::invokeMethod(titlebar, "title_reset_requested"));
 
         QCOMPARE(move_spy.count(), 1);
         QCOMPARE(resize_spy.count(), 1);
@@ -2120,6 +2130,7 @@ Item {
         QCOMPARE(
             title_edit_spy.takeFirst().at(0).toString(),
             QStringLiteral("User title"));
+        QCOMPARE(title_reset_spy.count(), 1);
     }
 
     void frame_shell_forwards_edge_resize_requests_and_disable_state()
@@ -5183,6 +5194,95 @@ Window {
         QCOMPARE(animated_mark->property("alt_reveal_forced").toBool(), false);
         QCOMPARE(focus_sink->property("activeFocus").toBool(), true);
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
+    }
+
+    void titlebar_title_reset_badge_requests_reset_without_accepting_the_draft()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+Window {
+    width: 420
+    height: 48
+    visible: true
+
+    VNM_ChromeTitleBar {
+        objectName: "chrome_titlebar"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        title: "Build logs"
+        title_editing_enabled: true
+    }
+
+    Item {
+        objectName: "focus_sink"
+    }
+}
+)";
+
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/titlebar_title_reset_contract.qml");
+        QVERIFY(root != nullptr);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        QVERIFY(window != nullptr);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject* titlebar     = find_descendant(root.get(), QStringLiteral("chrome_titlebar"));
+        QObject* editor_frame = find_descendant(root.get(), QStringLiteral("title_editor_frame"));
+        QObject* focus_sink   = find_descendant(root.get(), QStringLiteral("focus_sink"));
+        QQuickItem* editor       = find_item(root.get(), QStringLiteral("title_editor"));
+        QQuickItem* reset_button = find_item(root.get(), QStringLiteral("title_reset_button"));
+        QVERIFY(titlebar     != nullptr);
+        QVERIFY(editor_frame != nullptr);
+        QVERIFY(focus_sink   != nullptr);
+        QVERIFY(editor       != nullptr);
+        QVERIFY(reset_button != nullptr);
+
+        QVERIFY(QMetaObject::invokeMethod(focus_sink, "forceActiveFocus"));
+        QTRY_VERIFY_WITH_TIMEOUT(focus_sink->property("activeFocus").toBool(), 1000);
+        QVariant began_editing;
+        QVERIFY(QMetaObject::invokeMethod(
+            titlebar,
+            "begin_title_edit",
+            Q_RETURN_ARG(QVariant, began_editing)));
+        QVERIFY(began_editing.toBool());
+
+        // Without an owner-reported custom title there is nothing to remove.
+        QVERIFY(!reset_button->isVisible());
+        QVERIFY(find_descendant(root.get(), QStringLiteral("title_reset_icon")) == nullptr);
+
+        QVERIFY(titlebar->setProperty("title_reset_available", true));
+        QVERIFY(reset_button->isVisible());
+        QObject* reset_icon = find_descendant(root.get(), QStringLiteral("title_reset_icon"));
+        QVERIFY(reset_icon != nullptr);
+        QCOMPARE(reset_icon->property("source").toUrl().fileName(),
+            QStringLiteral("vnm_title_reset.svg"));
+        QTRY_COMPARE_WITH_TIMEOUT(reset_icon->property("status").toInt(), 1, 1000);
+        // The row layout sizes the editor frame on its next polish.
+        QTRY_VERIFY_WITH_TIMEOUT(reset_button->width() > 0, 1000);
+        QVERIFY(editor->width() > 0);
+        QVERIFY(editor->x() + editor->width() <= reset_button->x());
+
+        QSignalSpy accepted_spy(titlebar, SIGNAL(title_edit_accepted(QString)));
+        QSignalSpy reset_spy(titlebar, SIGNAL(title_reset_requested()));
+        QVERIFY(accepted_spy.isValid());
+        QVERIFY(reset_spy.isValid());
+        QVERIFY(editor->setProperty("text", QStringLiteral("Draft title")));
+
+        const QPointF badge_center = reset_button->mapToScene(
+            QPointF(reset_button->width() / 2.0, reset_button->height() / 2.0));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, badge_center.toPoint());
+        QCOMPARE(reset_spy.count(), 1);
+        QCOMPARE(accepted_spy.count(), 0);
+        QCOMPARE(editor_frame->property("visible").toBool(), false);
+        QCOMPARE(focus_sink->property("activeFocus").toBool(), true);
+        QVERIFY(find_descendant(root.get(), QStringLiteral("title_reset_icon")) == nullptr);
     }
 };
 

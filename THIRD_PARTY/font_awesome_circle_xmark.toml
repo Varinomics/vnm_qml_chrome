@@ -1,0 +1,24 @@
+name = "Font Awesome Free solid circle-xmark icon"
+spdx_license_expression = "CC-BY-4.0"
+compliance_status = "resolved"
+copyright = "Copyright 2026 Fonticons, Inc."
+attribution = "Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com"
+modification_notice = "Unmodified; the tinting renderer uses only the path coverage, so the upstream currentColor fill is kept."
+
+upstream_repository = "https://github.com/FortAwesome/Font-Awesome"
+upstream_revision = "14c65a3747d0f3b751f15831fc719236aea8729d"
+input_path = "svgs-full/solid/circle-xmark.svg"
+input_url = "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/14c65a3747d0f3b751f15831fc719236aea8729d/svgs-full/solid/circle-xmark.svg"
+input_sha256 = "903370338807c93af4bd499ff2f1b27ad6a53fe8ce92e6e145193dcd3a64b281"
+input_size = 799
+
+output_path = "qml/vnm_title_reset.svg"
+output_sha256 = "903370338807c93af4bd499ff2f1b27ad6a53fe8ce92e6e145193dcd3a64b281"
+output_size = 799
+view_box = "0 0 640 640"
+geometry_sha256 = "47be247c1bd2f3684e597a9cdf307d203ea2e326bfd9b0f3af74aaaa28099a26"
+
+license_url = "https://creativecommons.org/licenses/by/4.0/legalcode.txt"
+license_text = "LICENSES/CC-BY-4.0.txt"
+license_text_sha256 = "0184bb911fad08c751c66ec52d6e4c815497fe3a65249bfddbdcffcf57439171"
+notice = "THIRD_PARTY_NOTICES.md#font-awesome-free-solid-circle-xmark-icon"

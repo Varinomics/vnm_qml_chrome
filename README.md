@@ -71,6 +71,13 @@ region is presented as a text box. The Varinomics mark stays in its Alt pose
 unless the always-on-top eye is active; the latched eye intentionally takes
 precedence. The capability is disabled by default.
 
+While an accepted title replaces the application's own, the owner sets
+`title_reset_available: true`. The text box then shows a Font Awesome
+circle-xmark badge (see its [provenance manifest](THIRD_PARTY/font_awesome_circle_xmark.toml));
+clicking it ends editing without accepting the draft and emits
+`title_reset_requested()`, so the owner can restore its own title and clear
+the flag.
+
 `VNM_MonochromeIcon` accepts `source`, logical `extent`, `tint`, and `behind`
 (the painted item beneath the icon). It captures the image at three samples
 per device pixel in each axis, preserves the artwork aspect, and composites

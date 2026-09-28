@@ -11,6 +11,9 @@ Rectangle {
     property string title: ""
     property string title_font_family: ""
     property bool title_editing_enabled: false
+    // Set by the owner while a user-edited title replaces its own. The title
+    // editor then shows a badge that emits title_reset_requested().
+    property bool title_reset_available: false
     property bool active: true
     property bool maximized: false
     property bool resize_enabled: true
@@ -108,6 +111,7 @@ Rectangle {
     signal maximize_toggle_requested()
     signal close_requested()
     signal title_edit_accepted(string title)
+    signal title_reset_requested()
     // A double click on the mark. The chrome has no idea what a theme is; the
     // owner decides what, if anything, this means.
     signal theme_toggle_requested()
@@ -161,6 +165,11 @@ Rectangle {
 
     function cancel_title_edit() {
         finish_title_edit(true)
+    }
+
+    function request_title_reset() {
+        finish_title_edit(true)
+        titlebar.title_reset_requested()
     }
 
     function finish_title_edit(restore_previous_focus) {
@@ -391,7 +400,7 @@ Rectangle {
             visible: !title_editor_frame.visible
         }
 
-        Rectangle {
+        Item {
             id: title_editor_frame
             objectName: "title_editor_frame"
 
@@ -401,10 +410,19 @@ Rectangle {
             Layout.preferredHeight: 24
             Layout.rightMargin: 8
             visible: false
-            color: titlebar.theme.titlebar_button_hover
-            border.color: titlebar.theme.titlebar_activity_marker
-            border.width: titlebar.content_border_width
-            radius: 2
+
+            // A sibling of the reset badge rather than its parent: the badge
+            // composites against a capture of this fill, and a capture of an
+            // ancestor would contain the badge itself.
+            Rectangle {
+                id: title_editor_background
+
+                anchors.fill: parent
+                color: titlebar.theme.titlebar_button_hover
+                border.color: titlebar.theme.titlebar_activity_marker
+                border.width: titlebar.content_border_width
+                radius: 2
+            }
 
             TextInput {
                 id: title_editor
@@ -415,7 +433,9 @@ Rectangle {
 
                 anchors.fill: parent
                 anchors.leftMargin: 6
-                anchors.rightMargin: 6
+                anchors.rightMargin: title_reset_button.visible
+                    ? title_reset_button.width
+                    : 6
                 visible: title_editor_frame.visible
                 color: titlebar.theme.titlebar_text
                 selectionColor: titlebar.theme.titlebar_activity_marker
@@ -434,6 +454,36 @@ Rectangle {
                     }
                 }
                 Keys.onEscapePressed: titlebar.cancel_title_edit()
+            }
+
+            MouseArea {
+                id: title_reset_button
+                objectName: "title_reset_button"
+
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                width: height
+                visible: titlebar.title_reset_available
+                hoverEnabled: true
+                // A MouseArea takes no focus, so a press leaves the editor
+                // focused instead of accepting the draft on focus loss.
+                onClicked: titlebar.request_title_reset()
+
+                // Loaded only while shown, because the icon samples its window
+                // on every animation tick to stay on the device-pixel grid.
+                Loader {
+                    anchors.centerIn: parent
+                    active: title_reset_button.visible
+                    sourceComponent: VNM_MonochromeIcon {
+                        icon_object_name: "title_reset_icon"
+                        extent: 16
+                        source: Qt.resolvedUrl("vnm_title_reset.svg")
+                        tint: titlebar.theme.titlebar_text
+                        behind: title_editor_background
+                        opacity: title_reset_button.containsMouse ? 1 : 0.6
+                    }
+                }
             }
         }
 
