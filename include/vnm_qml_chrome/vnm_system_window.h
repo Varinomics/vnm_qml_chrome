@@ -34,6 +34,9 @@ public:
     /** Restore a window, including a frameless window maximized by the OS. */
     Q_INVOKABLE void show_normal(QWindow* window) const;
 
+    /** Query current normal-window state without creating a native window. */
+    Q_INVOKABLE bool is_windowed(QWindow* window) const;
+
     Q_INVOKABLE bool start_system_move(QWindow* window) const;
     Q_INVOKABLE bool start_system_resize(QWindow* window, int edges) const;
     /**

@@ -49,7 +49,8 @@ bool nearly_equal(qreal lhs, qreal rhs)
 
 HWND window_hwnd(QWindow* window)
 {
-    if (!window) {
+    // Other platform plugins can return synthetic IDs that alias unrelated HWNDs.
+    if (!window || QGuiApplication::platformName() != QStringLiteral("windows")) {
         return nullptr;
     }
 
@@ -569,6 +570,26 @@ void vnm_qml_chrome::System_window::show_normal(QWindow* window) const
 #endif
 
     window->showNormal();
+}
+
+bool vnm_qml_chrome::System_window::is_windowed(QWindow* window) const
+{
+    if (!window || window->visibility() != QWindow::Windowed
+            || window->windowState() != Qt::WindowNoState) {
+        return false;
+    }
+
+#ifdef Q_OS_WIN
+    if (window->handle()) {
+        const HWND hwnd = window_hwnd(window);
+        // Native resize can run queued QML before Qt publishes the new state.
+        if (hwnd && (IsZoomed(hwnd) || IsIconic(hwnd))) {
+            return false;
+        }
+    }
+#endif
+
+    return true;
 }
 
 bool vnm_qml_chrome::System_window::start_system_move(QWindow* window) const
