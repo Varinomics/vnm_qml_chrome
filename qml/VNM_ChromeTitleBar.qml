@@ -9,6 +9,8 @@ Rectangle {
 
     property VNM_ChromeTheme theme: VNM_ChromeTheme {}
     property string title: ""
+    // Styling the chrome must not put markup in the window title or editor.
+    property string title_rich_text: ""
     property string title_font_family: ""
     property bool title_editing_enabled: false
     // Set by the owner while a user-edited title replaces its own. The title
@@ -393,7 +395,12 @@ Rectangle {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.rightMargin: 8
-            text: titlebar.title
+            text: titlebar.title_rich_text.length > 0
+                ? titlebar.title_rich_text
+                : titlebar.title
+            textFormat: titlebar.title_rich_text.length > 0
+                ? Text.StyledText
+                : Text.AutoText
             color: titlebar.theme.titlebar_text
             elide: Text.ElideRight
             font: title_font_factory.requested_font(titlebar.title_font_family)
