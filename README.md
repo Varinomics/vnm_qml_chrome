@@ -2,7 +2,7 @@
 
 [![CI Linux](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-linux.yml/badge.svg?branch=master)](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-linux.yml) [![CI macOS](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-macos.yml/badge.svg?branch=master)](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-macos.yml) [![CI Windows](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-windows.yml/badge.svg?branch=master)](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-windows.yml) [![CI FreeBSD](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-freebsd.yml/badge.svg?branch=master)](https://github.com/Varinomics/vnm_qml_chrome/actions/workflows/ci-freebsd.yml)
 
-Requires Qt 6.11.1 or newer.
+Requires Qt 6.12 or newer.
 
 `VNM_Snapped_rectangle` is available from `VNM_Chrome 1.0` for control
 backgrounds that need their painted edges aligned to the device-pixel grid. It

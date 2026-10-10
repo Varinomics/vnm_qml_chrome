@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Windows / Qt 6.11.1
+    name: Windows / Qt 6.12.0
     runs-on: windows-latest
 
     steps:
@@ -21,7 +21,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: 6.11.1
+          version: 6.12.0
           arch: win64_msvc2022_64
           cache: true
           modules: qtshadertools

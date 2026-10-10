@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(vnm_qml_chrome_minimum_qt_version 6.11.1)
+set(vnm_qml_chrome_minimum_qt_version 6.12)
 
 find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     Core
