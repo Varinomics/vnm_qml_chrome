@@ -41,7 +41,7 @@ jobs:
             echo 'FreeBSD-ports: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD-ports.conf
             echo 'FreeBSD: { url: https://pkg.FreeBSD.org/${ABI}/latest }' > /usr/local/etc/pkg/repos/FreeBSD.conf
             pkg update -f
-            pkg install -y cmake ninja pkgconf python3 xorg-vfbserver
+            pkg install -y git cmake ninja pkgconf python3 xorg-vfbserver
           run: |
             set -eu
             python3 "$QT_SDK_DIRECTORY/sdk.py" install \
