@@ -1354,7 +1354,7 @@ Item {
         QCOMPARE(native_frame->resize_outward_margins(), expected_margins);
     }
 
-    void runtime_bootstrap_registers_manual_qrc_import()
+    void runtime_bootstrap_registers_compiled_resource_import()
     {
         QQmlEngine engine;
         QVERIFY(vnm_init_qml_chrome_runtime(engine));
@@ -1366,6 +1366,15 @@ Item {
         QVERIFY(qmldir_resource.isValid());
         QVERIFY(engine.importPathList().contains(import_path));
         QCOMPARE(engine.importPathList().count(import_path), qsizetype{1});
+
+        const QDir module_resources(QStringLiteral(":/vnm_qml_chrome/qml/VNM_Chrome"));
+        const QStringList qml_files = module_resources.entryList({QStringLiteral("*.qml")}, QDir::Files);
+        QVERIFY(!qml_files.isEmpty());
+        for (const QString& qml_file : qml_files) {
+            QFile source(module_resources.filePath(qml_file));
+            QVERIFY2(source.open(QIODevice::ReadOnly), qPrintable(source.fileName()));
+            QVERIFY2(source.readAll().isEmpty(), qPrintable(source.fileName()));
+        }
     }
 
     void exported_types_instantiate_and_expose_contract()

@@ -18,6 +18,9 @@ find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     QuickShapes
     QuickControls2
     ShaderTools)
+if(QT_QML_NO_CACHEGEN)
+    message(FATAL_ERROR "vnm_qml_chrome requires QML cache generation because QML source contents are discarded")
+endif()
 
 if(PROJECT_IS_TOP_LEVEL)
     set(VNM_QML_CHROME_BUILD_TESTS_DEFAULT ON)
@@ -50,7 +53,43 @@ target_sources(vnm_qml_chrome PRIVATE
     src/vnm_native_window_frame.cpp
     src/vnm_qml_chrome_runtime.cpp
     src/vnm_system_window.cpp
-    vnm_qml_chrome.qrc
+)
+
+set(vnm_qml_chrome_qml_files
+    qml/VNM_ChromeTheme.qml
+    qml/VNM_ChromeToolTip.qml
+    qml/VNM_AnimatedMark.qml
+    qml/VNM_ChromeWindowButton.qml
+    qml/VNM_TitleBarRoundButton.qml
+    qml/VNM_DarkModeTitleButton.qml
+    qml/VNM_LanguageTitleButton.qml
+    qml/VNM_ChromeResizeArea.qml
+    qml/VNM_ChromeBottomResizeLayer.qml
+    qml/VNM_ChromeSideResizeLayer.qml
+    qml/VNM_ChromeWindowFrame.qml
+    qml/VNM_ChromeTitleBar.qml
+    qml/VNM_ChromeFrameShell.qml
+    qml/VNM_MonochromeIcon.qml
+    qml/VNM_Snapped_rectangle.qml
+)
+set(vnm_qml_chrome_image_files
+    qml/vnm_mark_eye.svg
+    qml/vnm_title_reset.svg
+)
+foreach(resource_file IN LISTS vnm_qml_chrome_qml_files vnm_qml_chrome_image_files)
+    get_filename_component(resource_name "${resource_file}" NAME)
+    set_source_files_properties("${resource_file}" PROPERTIES QT_RESOURCE_ALIAS "${resource_name}")
+endforeach()
+qt_add_qml_module(vnm_qml_chrome
+    URI VNM_Chrome
+    VERSION 1.0
+    RESOURCE_PREFIX "/vnm_qml_chrome/qml"
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/VNM_Chrome"
+    NO_PLUGIN
+    DISCARD_QML_CONTENTS
+    QML_FILES ${vnm_qml_chrome_qml_files}
+    RESOURCES ${vnm_qml_chrome_image_files}
+    OUTPUT_TARGETS vnm_qml_chrome_qml_output_targets
 )
 
 # Consumers need a feature minimum that remains available after this target is

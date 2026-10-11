@@ -15,10 +15,12 @@
 #include <mutex>
 #include <string>
 
-// Forward-declare the generated resource initializer so that the linker pulls
-// in vnm_qml_chrome.qrc when this target is consumed as a static library.
-extern int qInitResources_vnm_qml_chrome();
+// The shader object is archived in this library; QML module resources are
+// retained by the resource targets that qt_add_qml_module links to consumers.
 extern int qInitResources_vnm_qml_chrome_icon_shaders();
+// NO_PLUGIN leaves the compiled-unit loader in the static archive. Referencing
+// its initializer keeps it linked along with the ordinary resource targets.
+extern int qInitResources_qmlcache_vnm_qml_chrome();
 
 namespace {
 
@@ -31,7 +33,7 @@ std::once_flag s_qml_type_registration_flag;
 void ensure_qrc_initialized()
 {
     std::call_once(s_qrc_init_flag, [] {
-        qInitResources_vnm_qml_chrome();
+        qInitResources_qmlcache_vnm_qml_chrome();
         qInitResources_vnm_qml_chrome_icon_shaders();
     });
 }
@@ -77,7 +79,7 @@ bool verify_chrome_resources_available()
 
     const std::string detail =
         std::string("vnm_qml_chrome resources are unavailable. ")
-        + "The automatic Q_INIT_RESOURCE failed -- this should not happen. "
+        + "The QML module resource targets must be linked into the application. "
         + "Missing resource: " + k_chrome_qmldir_resource;
     qCritical().noquote() << QStringLiteral("FATAL: %1").arg(QString::fromStdString(detail));
     return false;

@@ -4,6 +4,24 @@
 
 Requires Qt 6.12 or newer.
 
+The module uses `qt_add_qml_module(QML_FILES ... DISCARD_QML_CONTENTS)` in
+every configuration. Keep `QT_QML_NO_CACHEGEN=OFF` (the default); configure
+rejects disabling generation. Qt compiles supported bindings to native code
+and retains compiled bytecode for the others. The embedded compiled units
+are the only deployed QML representation, and require the matching Qt
+build at runtime. Rebuild the library and its consumers when changing Qt.
+Source text is unavailable for fallback or QML debugging that disables compiled
+units, including in Debug builds. Strings, metadata and compiled code remain
+inspectable; this is not encryption.
+
+Hosts that require no generated QML disk cache should set
+`QML_DISK_CACHE=aot` and remove `QML_FORCE_DISK_CACHE` and
+`QML_DISABLE_DISK_CACHE` before constructing any Qt application or QML engine.
+Preserve the caller's environment separately for child processes. This library
+does not change the host process's cache policy. Link the CMake target
+`vnm_qml_chrome::vnm_qml_chrome` so Qt's compiled units and resource initializers
+are retained.
+
 `VNM_Snapped_rectangle` is available from `VNM_Chrome 1.0` for control
 backgrounds that need their painted edges aligned to the device-pixel grid. It
 keeps the requested logical geometry and exposes `color`, `border_color`,
