@@ -4,14 +4,15 @@
 
 Requires Qt 6.12 or newer.
 
-The module uses `qt_add_qml_module(QML_FILES ... DISCARD_QML_CONTENTS)` in
-every configuration. Keep `QT_QML_NO_CACHEGEN=OFF` (the default); configure
+The module compiles its QML with `qt_add_qml_module(QML_FILES ...)` and
+discards source contents in Release builds. Other configurations retain source.
+Keep `QT_QML_NO_CACHEGEN=OFF` (the default); configure
 rejects disabling generation. Qt compiles supported bindings to native code
 and retains compiled bytecode for the others. The embedded compiled units
-are the only deployed QML representation, and require the matching Qt
+require the matching Qt
 build at runtime. Rebuild the library and its consumers when changing Qt.
-Source text is unavailable for fallback or QML debugging that disables compiled
-units, including in Debug builds. Strings, metadata and compiled code remain
+Release source text is unavailable for fallback or QML debugging that disables
+compiled units. Strings, metadata and compiled code remain
 inspectable; this is not encryption.
 
 Hosts that require no generated QML disk cache should set

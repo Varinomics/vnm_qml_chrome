@@ -18,8 +18,10 @@ find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     QuickShapes
     QuickControls2
     ShaderTools)
+include(cmake/vnm_cmake_dependency.cmake)
+
 if(QT_QML_NO_CACHEGEN)
-    message(FATAL_ERROR "vnm_qml_chrome requires QML cache generation because QML source contents are discarded")
+    message(FATAL_ERROR "vnm_qml_chrome requires QML cache generation")
 endif()
 
 if(PROJECT_IS_TOP_LEVEL)
@@ -80,17 +82,16 @@ foreach(resource_file IN LISTS vnm_qml_chrome_qml_files vnm_qml_chrome_image_fil
     get_filename_component(resource_name "${resource_file}" NAME)
     set_source_files_properties("${resource_file}" PROPERTIES QT_RESOURCE_ALIAS "${resource_name}")
 endforeach()
-qt_add_qml_module(vnm_qml_chrome
+vnm_add_qml_resources(vnm_qml_chrome
     URI VNM_Chrome
     VERSION 1.0
     RESOURCE_PREFIX "/vnm_qml_chrome/qml"
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/VNM_Chrome"
-    NO_PLUGIN
-    DISCARD_QML_CONTENTS
+    GENERATE_QMLDIR
     QML_FILES ${vnm_qml_chrome_qml_files}
     RESOURCES ${vnm_qml_chrome_image_files}
-    OUTPUT_TARGETS vnm_qml_chrome_qml_output_targets
 )
+get_target_property(vnm_qml_chrome_qml_output_targets
+    vnm_qml_chrome VNM_QML_RESOURCE_TARGETS)
 
 # Consumers need a feature minimum that remains available after this target is
 # exported or provided by an embedding parent project.
