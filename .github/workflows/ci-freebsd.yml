@@ -12,24 +12,57 @@ concurrency:
 
 jobs:
   build:
-    name: FreeBSD 15.0 / Qt >= 6.12.0
+    name: FreeBSD 15.x / Qt >= 6.12.0
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
 
+      - name: Download shared FreeBSD Qt SDK
+        id: qt-sdk
+        uses: Varinomics/qt-freebsd@master
+        with:
+          minimum-qt-version: '6.12'
+
       - name: Build and test
         uses: vmactions/freebsd-vm@v1
+        env:
+          QT_SDK_DIRECTORY: ${{ steps.qt-sdk.outputs.directory }}
+          QT_SDK_PREFIX: ${{ steps.qt-sdk.outputs.prefix }}
         with:
-          release: "15.0"
+          # Keep the VM userland current with the FreeBSD 15 ports repository.
+          release: "15"
           usesh: true
+          envs: 'QT_SDK_DIRECTORY QT_SDK_PREFIX'
           prepare: |
+            set -eu
+            pkg bootstrap -fy
+            mkdir -p /usr/local/etc/pkg/repos
+            echo 'FreeBSD-ports: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD-ports.conf
+            echo 'FreeBSD: { url: https://pkg.FreeBSD.org/${ABI}/latest }' > /usr/local/etc/pkg/repos/FreeBSD.conf
             pkg update -f
-            pkg install -y cmake ninja pkgconf qt6-base qt6-declarative qt6-shadertools
+            pkg install -y cmake ninja pkgconf python3 xorg-vfbserver
           run: |
+            set -eu
+            python3 "$QT_SDK_DIRECTORY/sdk.py" install \
+              --directory "$QT_SDK_DIRECTORY" --minimum-qt-version 6.12
             cmake -S . -B build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_PREFIX_PATH="$QT_SDK_PREFIX" \
               -DVNM_QML_CHROME_BUILD_TESTS=ON \
               -DVNM_QML_CHROME_BUILD_EXAMPLES=ON
             cmake --build build --config Release
+            # The offscreen OpenGL backend creates its GLX context through X11.
+            Xvfb :99 -screen 0 1280x1024x24 >/tmp/vnm-chrome-xvfb.log 2>&1 &
+            trap 'kill $!' EXIT
+            export DISPLAY=:99
+            attempts=0
+            until test -S /tmp/.X11-unix/X99; do
+              attempts=$((attempts + 1))
+              if test "$attempts" -ge 30; then
+                cat /tmp/vnm-chrome-xvfb.log
+                exit 1
+              fi
+              sleep 1
+            done
             env QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic ctest --test-dir build --output-on-failure
