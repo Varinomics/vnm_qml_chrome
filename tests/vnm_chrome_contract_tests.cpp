@@ -4394,9 +4394,11 @@ VNM_AnimatedMark {
         QVERIFY(mark != nullptr);
 
         auto* grey = find_item(root_object.get(), QStringLiteral("vnm_mark_grey"));
+        auto* orange = find_item(root_object.get(), QStringLiteral("vnm_mark_orange"));
         auto* eye = find_item(
             root_object.get(), QStringLiteral("vnm_mark_stay_on_top_eye"));
         QVERIFY(grey != nullptr);
+        QVERIFY(orange != nullptr);
         QVERIFY(eye  != nullptr);
 
         QQuickWindow window;
@@ -4406,20 +4408,33 @@ VNM_AnimatedMark {
         QVERIFY(mark->setProperty("hover_active", true));
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
-        QTRY_VERIFY_WITH_TIMEOUT(
-            qAbs(grey->property("opacity").toReal()) < 0.01,
-            1000);
-        auto circle_settled = [mark]() {
-            QVariant settled;
-            return QMetaObject::invokeMethod(
-                       mark,
-                       "circle_settled",
-                       Q_RETURN_ARG(QVariant, settled))
-                && settled.toBool();
+        // The UI's near-settled predicate can pass before the transition ends.
+        // Pixel comparisons require the same final geometry in both captures.
+        auto circle_fully_settled = [mark, orange, grey]() {
+            const qreal target_scale = mark->property("orange_scale").toReal();
+            const qreal target_radius = orange->width() / 2
+                - mark->property("hover_circle_radius_inset").toReal() / target_scale;
+            const qreal target_offset = mark->property("hover_circle_x_offset").toReal();
+            return mark->property("state").toString() == QStringLiteral("normal_hover")
+                && qFuzzyCompare(orange->scale(), target_scale)
+                && qFuzzyCompare(orange->property("radius").toReal() + 1, target_radius + 1)
+                && qFuzzyCompare(orange->property("circle_x_offset").toReal() + 1,
+                                 target_offset + 1)
+                && qFuzzyIsNull(grey->opacity());
         };
-        QTRY_VERIFY_WITH_TIMEOUT(circle_settled(), 1000);
+        auto capture_state = [mark, orange, grey, eye]() {
+            return QStringLiteral("state=%1 scale=%2 radius=%3 offset=%4 grey=%5 eye=%6")
+                .arg(mark->property("state").toString())
+                .arg(orange->scale(), 0, 'g', 17)
+                .arg(orange->property("radius").toReal(), 0, 'g', 17)
+                .arg(orange->property("circle_x_offset").toReal(), 0, 'g', 17)
+                .arg(grey->opacity(), 0, 'g', 17)
+                .arg(eye->opacity(), 0, 'g', 17);
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(circle_fully_settled(), 1000);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
+        const QString baseline_state = capture_state();
         const QImage baseline = window.grabWindow();
         QVERIFY(!baseline.isNull());
         QCOMPARE(baseline.size(), QSize(20, 20));
@@ -4429,6 +4444,7 @@ VNM_AnimatedMark {
             qAbs(eye->property("opacity").toReal() - 1.0) < 0.01,
             1000);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        const QString eye_state = capture_state();
         const QImage with_eye = window.grabWindow();
         QVERIFY(!with_eye.isNull());
         QCOMPARE(with_eye.size(), baseline.size());
@@ -4446,8 +4462,17 @@ VNM_AnimatedMark {
         for (const QPoint& point : {
                  QPoint(2, 2), QPoint(17, 2), QPoint(2, 17), QPoint(17, 17)})
         {
-            QVERIFY(pixels_nearly_equal(
-                baseline.pixelColor(point), with_eye.pixelColor(point)));
+            const QByteArray message = QStringLiteral(
+                "eye changed its canvas corner at x=%1 y=%2: before=%3 after=%4; "
+                "baseline {%5}; eye {%6}")
+                .arg(point.x())
+                .arg(point.y())
+                .arg(baseline.pixelColor(point).name(QColor::HexArgb))
+                .arg(with_eye.pixelColor(point).name(QColor::HexArgb))
+                .arg(baseline_state, eye_state)
+                .toUtf8();
+            QVERIFY2(pixels_nearly_equal(
+                baseline.pixelColor(point), with_eye.pixelColor(point)), message.constData());
         }
 
         int changed_pixel_count = 0;
@@ -4462,11 +4487,13 @@ VNM_AnimatedMark {
 
                 ++changed_pixel_count;
                 const QByteArray message = QStringLiteral(
-                    "eye darkened its baseline at x=%1 y=%2: before=%3 after=%4")
+                    "eye darkened its baseline at x=%1 y=%2: before=%3 after=%4; "
+                    "baseline {%5}; eye {%6}")
                     .arg(x)
                     .arg(y)
                     .arg(before.name(QColor::HexArgb))
                     .arg(after.name(QColor::HexArgb))
+                    .arg(baseline_state, eye_state)
                     .toUtf8();
                 QVERIFY2(
                     after.red()   + channel_tolerance >= before.red()
