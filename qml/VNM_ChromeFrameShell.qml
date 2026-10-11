@@ -25,7 +25,7 @@ Item {
     property real device_pixel_ratio: window_device_pixel_ratio
     property real render_target_physical_width: 0
     property real render_target_physical_height: 0
-    property real titlebar_height: 32
+    property real titlebar_height: titlebar.implicitHeight
     property bool resize_enabled: true
 
     property alias title: titlebar.title

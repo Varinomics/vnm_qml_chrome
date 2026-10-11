@@ -16,7 +16,13 @@ Set `title_font_family` on `VNM_ChromeTitleBar` or
 `VNM_ChromeFrameShell` to use an application-supplied title font. The caller
 owns loading and packaging that font; `vnm_qml_chrome` only applies the family
 name to the title label and title editor. Leave the family empty to retain each
-control's default font.
+control's default font. Titles, the activity marker, and process-ID text follow
+the local application or ApplicationWindow font at the title-role proportion
+19/18, retaining its point or logical-pixel unit. Application font changes
+update the chrome; Qt handles display scaling. Default titlebar, editor, and
+process-ID text geometry grows with the measured font, while explicit caller
+height overrides remain authoritative. Shared button tooltips use white text
+on an unframed dark background independently of the platform Controls style.
 
 A plain left click on the Varinomics mark toggles an always-on-top eye.
 Ctrl+left-click reveals the process ID; a second Ctrl+left-click retracts it.

@@ -208,7 +208,14 @@ Rectangle {
         mouse.accepted = true
     }
 
-    height: 32
+    readonly property font local_ui_font: ApplicationWindow.window
+        ? ApplicationWindow.window.font : VNM_system_window.application_font
+    implicitHeight: Math.ceil(Math.max(32,
+        title_label.implicitHeight + 12,
+        activity_marker_label.implicitHeight + 12,
+        title_editor_frame.implicitHeight + 8,
+        animated_mark.implicitHeight + 12))
+    height: implicitHeight
     color: theme.titlebar
     z: 40
 
@@ -222,10 +229,7 @@ Rectangle {
         id: title_font_factory
 
         function requested_font(family) {
-            // Qt.font routes pointSize through an integer setter. Mutating the
-            // value property afterward preserves the title's half-point size.
-            let requested_font = Qt.font({ pointSize: 10 })
-            requested_font.pointSize = 9.5
+            let requested_font = VNM_system_window.chrome_font(titlebar.local_ui_font)
             if (family.length > 0) {
                 requested_font.family = family
             }
@@ -371,7 +375,7 @@ Rectangle {
             elide: Text.ElideRight
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            font.pointSize: 9.5
+            font: title_font_factory.requested_font("")
 
             Component.onCompleted: retain_marker_placeholder_if_needed()
             onTextChanged: retain_marker_placeholder_if_needed()
@@ -414,7 +418,8 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            Layout.preferredHeight: 24
+            implicitHeight: Math.max(24, title_editor.implicitHeight + 6)
+            Layout.preferredHeight: implicitHeight
             Layout.rightMargin: 8
             visible: false
 
@@ -529,9 +534,15 @@ Rectangle {
                     width: (modelData.width !== undefined) ? modelData.width : 46
                     height: titlebar.height
 
-                    ToolTip.text: (modelData.tooltip !== undefined) ? modelData.tooltip : ""
-                    ToolTip.delay: 500
-                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    VNM_ChromeToolTip {
+                        objectName: "custom_button_tooltip"
+                        parent: custom_button
+                        theme: custom_button.theme
+                        text: (custom_button.modelData.tooltip !== undefined)
+                            ? custom_button.modelData.tooltip : ""
+                        delay: 500
+                        visible: custom_button.hovered && text.length > 0
+                    }
 
                     onClicked: {
                         if (typeof modelData.action === "function") {

@@ -162,6 +162,18 @@ if(VNM_QML_CHROME_BUILD_TESTS)
     if(BUILD_TESTING)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+        if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            add_executable(vnm_macos_window_resize_tests tests/vnm_macos_window_resize_tests.cpp)
+            target_link_libraries(vnm_macos_window_resize_tests PRIVATE
+                vnm_qml_chrome::vnm_qml_chrome Qt6::Gui Qt6::Test)
+            add_test(NAME vnm_chrome_cocoa_resize_tests
+                COMMAND vnm_macos_window_resize_tests -platform cocoa)
+            set_tests_properties(vnm_chrome_cocoa_resize_tests PROPERTIES
+                ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;${vnm_qml_chrome_qt_runtime_path}"
+                LABELS real-platform
+                TIMEOUT 120)
+        endif()
+
         add_test(
             NAME vnm_chrome_contract_tests
             COMMAND ${CMAKE_COMMAND} -E env

@@ -8,6 +8,7 @@
 #include <QHash>
 #include <QKeyEvent>
 #include <QMetaObject>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QSet>
 #include <QSize>
@@ -18,6 +19,7 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -468,6 +470,7 @@ vnm_qml_chrome::System_window::System_window(QObject* parent)
     }
 
     update_alt_modifier_active();
+    m_application_font = QGuiApplication::font();
 }
 
 vnm_qml_chrome::System_window::~System_window() = default;
@@ -477,6 +480,25 @@ qint64 vnm_qml_chrome::System_window::process_id() const
     return QCoreApplication::applicationPid();
 }
 
+QFont vnm_qml_chrome::System_window::application_font() const
+{
+    return m_application_font;
+}
+
+QFont vnm_qml_chrome::System_window::chrome_font(const QFont& source) const
+{
+    // Only the role size is resolved here; controls retain their inherited
+    // family, style, and spacing, including ApplicationWindow overrides.
+    QFont requested;
+    if (source.pixelSize() > 0) {
+        requested.setPixelSize(qMax(1, qRound(source.pixelSize() * 19.0 / 18.0)));
+    }
+    else {
+        requested.setPointSizeF(source.pointSizeF() * 19.0 / 18.0);
+    }
+    return requested;
+}
+
 bool vnm_qml_chrome::System_window::alt_modifier_active() const
 {
     return m_alt_modifier_active;
@@ -484,7 +506,74 @@ bool vnm_qml_chrome::System_window::alt_modifier_active() const
 
 bool vnm_qml_chrome::System_window::eventFilter(QObject* watched, QEvent* event)
 {
+#ifdef Q_OS_MACOS
+    auto* window = qobject_cast<QWindow*>(watched);
     switch (event->type()) {
+        case QEvent::MouseButtonPress: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (window && mouse->button() == Qt::LeftButton) {
+                finish_cocoa_resize();
+                m_press_window   = window;
+                m_press_position = mouse->globalPosition();
+            }
+            break;
+        }
+
+        case QEvent::MouseMove: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (m_resize_window && window == m_resize_window) {
+                if (mouse->buttons().testFlag(Qt::LeftButton)) {
+                    update_cocoa_resize(mouse->globalPosition());
+                }
+                else {
+                    finish_cocoa_resize();
+                }
+            }
+            break;
+        }
+
+        case QEvent::MouseButtonRelease: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                if (m_resize_window && window == m_resize_window) {
+                    update_cocoa_resize(mouse->globalPosition());
+                }
+                finish_cocoa_resize();
+            }
+            break;
+        }
+
+        case QEvent::UngrabMouse:
+        case QEvent::WindowDeactivate:
+        case QEvent::WindowStateChange:
+        case QEvent::Hide:
+        case QEvent::Close:
+            if (window && (window == m_resize_window || window == m_press_window)) {
+                finish_cocoa_resize();
+            }
+            break;
+
+        case QEvent::ApplicationStateChange:
+            if (QGuiApplication::applicationState() != Qt::ApplicationActive) {
+                finish_cocoa_resize();
+            }
+            break;
+
+        default:
+            break;
+    }
+#endif
+
+    switch (event->type()) {
+        case QEvent::ApplicationFontChange: {
+            const QFont font = QGuiApplication::font();
+            if (font != m_application_font) {
+                m_application_font = font;
+                Q_EMIT application_font_changed();
+            }
+            break;
+        }
+
         case QEvent::KeyPress:
         case QEvent::KeyRelease: {
             const auto* key_event = static_cast<const QKeyEvent*>(event);
@@ -603,7 +692,7 @@ bool vnm_qml_chrome::System_window::start_system_move(QWindow* window) const
 
 bool vnm_qml_chrome::System_window::start_system_resize(
     QWindow* window,
-    int      edges) const
+    int      edges)
 {
     if (!window) {
         return false;
@@ -614,8 +703,84 @@ bool vnm_qml_chrome::System_window::start_system_resize(
         return false;
     }
 
-    return window->startSystemResize(qt_edges);
+    if (window->startSystemResize(qt_edges)) {
+        return true;
+    }
+
+#ifdef Q_OS_MACOS
+    return start_cocoa_resize(window, qt_edges);
+#else
+    return false;
+#endif
 }
+
+#ifdef Q_OS_MACOS
+bool vnm_qml_chrome::System_window::start_cocoa_resize(QWindow* window, Qt::Edges edges)
+{
+    // Cocoa has native window dragging but no QPlatformWindow resize operation.
+    // The press must belong to this window so a later programmatic call cannot
+    // adopt an unrelated mouse grab or a stale cursor position.
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa") ||
+        m_press_window != window                                  ||
+        !QGuiApplication::mouseButtons().testFlag(Qt::LeftButton)   ||
+        !is_windowed(window))
+    {
+        return false;
+    }
+
+    m_resize_window   = window;
+    m_resize_position = m_press_position;
+    m_resize_geometry = window->geometry();
+    m_resize_edges    = edges;
+    QObject::disconnect(m_resize_destroyed);
+    m_resize_destroyed = QObject::connect(window, &QObject::destroyed, this, [this] {
+        finish_cocoa_resize();
+    });
+    return true;
+}
+
+void vnm_qml_chrome::System_window::update_cocoa_resize(const QPointF& position)
+{
+    if (!m_resize_window || !is_windowed(m_resize_window)) {
+        finish_cocoa_resize();
+        return;
+    }
+
+    const QPoint delta = (position - m_resize_position).toPoint();
+    QRect geometry = m_resize_geometry;
+    const int min_width  = std::max(1, m_resize_window->minimumWidth());
+    const int min_height = std::max(1, m_resize_window->minimumHeight());
+    const int max_width  = std::max(min_width,  m_resize_window->maximumWidth());
+    const int max_height = std::max(min_height, m_resize_window->maximumHeight());
+
+    if (m_resize_edges.testFlag(Qt::LeftEdge)) {
+        const int width = std::clamp(m_resize_geometry.width() - delta.x(), min_width, max_width);
+        geometry.setLeft(m_resize_geometry.x() + m_resize_geometry.width() - width);
+    }
+    else
+    if (m_resize_edges.testFlag(Qt::RightEdge)) {
+        geometry.setWidth(std::clamp(m_resize_geometry.width() + delta.x(), min_width, max_width));
+    }
+    if (m_resize_edges.testFlag(Qt::TopEdge)) {
+        const int height = std::clamp(m_resize_geometry.height() - delta.y(), min_height, max_height);
+        geometry.setTop(m_resize_geometry.y() + m_resize_geometry.height() - height);
+    }
+    else
+    if (m_resize_edges.testFlag(Qt::BottomEdge)) {
+        geometry.setHeight(std::clamp(m_resize_geometry.height() + delta.y(), min_height, max_height));
+    }
+    m_resize_window->setGeometry(geometry);
+}
+
+void vnm_qml_chrome::System_window::finish_cocoa_resize()
+{
+    QObject::disconnect(m_resize_destroyed);
+    m_resize_destroyed = {};
+    m_resize_window.clear();
+    m_press_window.clear();
+    m_resize_edges = {};
+}
+#endif
 
 bool vnm_qml_chrome::System_window::set_window_stays_on_top(
     QWindow* window,

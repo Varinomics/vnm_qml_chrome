@@ -1,10 +1,13 @@
 import QtQuick
 import QtQuick.Shapes
+import QtQuick.Controls
 
 Item {
     id: mark
 
     property VNM_ChromeTheme theme: VNM_ChromeTheme {}
+    readonly property font local_ui_font: ApplicationWindow.window
+        ? ApplicationWindow.window.font : VNM_system_window.application_font
     property real mark_size: 20
     // "square" is the Varinomics mark: a single orange square in the
     // bottom-left corner. "cross" halves that square's diagonal and repeats it
@@ -384,6 +387,7 @@ Item {
 
     width: mark_size
     height: mark_size
+    implicitHeight: Math.max(mark_size, pid_caption.implicitHeight + 4, pid_edit.implicitHeight + 4)
     state: (hover_active
             || stay_on_top_active
             || icon_press_area.stay_on_top_press_candidate
@@ -698,10 +702,10 @@ Item {
         objectName: "vnm_mark_pid_pill"
 
         x: mark.hover_circle_x_offset
-        y: 0
+        y: (mark.mark_size - height) / 2
         z: 2
         width: mark.mark_size
-        height: mark.mark_size
+        height: mark.implicitHeight
         radius: (mark.mark_size - mark.hover_circle_radius_inset) / 2
         // Fixed brand orange; white text is the legible foreground on it.
         color: "#c44d28"
@@ -753,7 +757,7 @@ Item {
                 color: "white"
                 selectionColor: mark.theme.titlebar
                 selectedTextColor: "white"
-                font.pointSize: 9.5
+                font: VNM_system_window.chrome_font(mark.local_ui_font)
                 opacity: 0
 
                 Keys.onPressed: (event) => {

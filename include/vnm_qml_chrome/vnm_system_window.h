@@ -1,6 +1,11 @@
 #pragma once
 
+#include <QFont>
+#include <QMetaObject>
 #include <QObject>
+#include <QPointF>
+#include <QPointer>
+#include <QRect>
 #include <QSize>
 
 class QWindow;
@@ -13,12 +18,15 @@ namespace vnm_qml_chrome {
  * QWindow requires system move and resize requests to be made from the mouse
  * event handler that starts the operation. This singleton exposes those
  * operations together with physical window-size conversion. Resize edges must
- * be one edge or two adjacent edges.
+ * be one edge or two adjacent edges. Cocoa resizing follows the initiating
+ * mouse gesture through Qt geometry because that platform has no system resize
+ * operation; the window's minimum and maximum sizes remain authoritative.
  */
 class System_window : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(qint64 process_id READ process_id CONSTANT)
+    Q_PROPERTY(QFont application_font READ application_font NOTIFY application_font_changed)
     Q_PROPERTY(
         bool alt_modifier_active
         READ alt_modifier_active
@@ -29,6 +37,9 @@ public:
     ~System_window() override;
 
     qint64 process_id() const;
+    QFont application_font() const;
+    /** Title-role size retains the local font's point or logical-pixel unit. */
+    Q_INVOKABLE QFont chrome_font(const QFont& source) const;
     bool alt_modifier_active() const;
 
     /** Restore a window, including a frameless window maximized by the OS. */
@@ -38,7 +49,7 @@ public:
     Q_INVOKABLE bool is_windowed(QWindow* window) const;
 
     Q_INVOKABLE bool start_system_move(QWindow* window) const;
-    Q_INVOKABLE bool start_system_resize(QWindow* window, int edges) const;
+    Q_INVOKABLE bool start_system_resize(QWindow* window, int edges);
     /**
      * @brief Set or clear the platform's always-on-top window hint.
      *
@@ -83,6 +94,7 @@ public:
         qreal    device_pixel_ratio) const;
 
 Q_SIGNALS:
+    void application_font_changed();
     void alt_modifier_active_changed();
 
 protected:
@@ -93,7 +105,22 @@ private:
     void update_alt_modifier_active();
     void sync_alt_modifier_active();
 
+    QFont m_application_font;
     bool m_alt_modifier_active = false;
+
+#ifdef Q_OS_MACOS
+    bool start_cocoa_resize(QWindow* window, Qt::Edges edges);
+    void update_cocoa_resize(const QPointF& position);
+    void finish_cocoa_resize();
+
+    QPointer<QWindow>        m_press_window;
+    QPointF                 m_press_position;
+    QPointer<QWindow>        m_resize_window;
+    QPointF                 m_resize_position;
+    QRect                   m_resize_geometry;
+    Qt::Edges               m_resize_edges;
+    QMetaObject::Connection  m_resize_destroyed;
+#endif
 };
 
 } // namespace vnm_qml_chrome

@@ -13,9 +13,14 @@ Basic.RoundButton {
     height: 22
     padding: 0
     hoverEnabled: true
-    ToolTip.delay: 350
-    ToolTip.visible: hovered && tooltip_text.length > 0
-    ToolTip.text: tooltip_text
+    VNM_ChromeToolTip {
+        objectName: "round_button_tooltip"
+        parent: control
+        theme: control.theme
+        delay: 350
+        visible: control.hovered && control.tooltip_text.length > 0
+        text: control.tooltip_text
+    }
 
     background: Rectangle {
         radius: width / 2

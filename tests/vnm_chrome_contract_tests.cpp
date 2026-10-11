@@ -19,6 +19,7 @@
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QResource>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStyleHints>
 #include <QString>
@@ -875,6 +876,76 @@ Window {
         QVERIFY(invalid_resize_result.toBool());
     }
 
+    void chrome_follows_local_font_units_updates_and_default_geometry()
+    {
+        const QFont original_font = QGuiApplication::font();
+        const auto restore_font = qScopeGuard([original_font] {
+            QGuiApplication::setFont(original_font);
+        });
+        vnm_qml_chrome::System_window service;
+        QSignalSpy changes(&service, &vnm_qml_chrome::System_window::application_font_changed);
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+Item {
+    width: 600
+    height: 100
+    function override_height() { chrome_shell.titlebar_height = 44 }
+    VNM_ChromeFrameShell { id: chrome_shell; objectName: "local_font_shell"; width: 600; height: 100 }
+}
+)";
+        auto root = create_qml_object(engine, qml_source, "qrc:/tests/local_font_chrome.qml");
+        QVERIFY(root != nullptr);
+        auto* titlebar = find_item(root.get(), QStringLiteral("chrome_frame_shell_titlebar"));
+        auto* editor_frame = find_item(root.get(), QStringLiteral("title_editor_frame"));
+        auto* pill = find_item(root.get(), QStringLiteral("vnm_mark_pid_pill"));
+        auto* shell = find_item(root.get(), QStringLiteral("local_font_shell"));
+        QVERIFY(titlebar && editor_frame && pill && shell);
+        for (const bool pixels : {false, true}) {
+            QFont configured_font = original_font;
+            if (pixels) {
+                configured_font.setPixelSize(26);
+            }
+            else {
+                configured_font.setPointSizeF(24);
+            }
+            QGuiApplication::setFont(configured_font);
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QCOMPARE(service.application_font(), configured_font);
+            QVERIFY(changes.count() > 0);
+            const QFont role_font = service.chrome_font(configured_font);
+            QCOMPARE(role_font.resolveMask(), QFont::SizeResolved);
+            QCOMPARE(role_font.pixelSize(), pixels ? 27 : -1);
+            QCOMPARE(role_font.pointSizeF(), pixels ? -1.0 : 24 * 19.0 / 18.0);
+            for (const qreal ratio : {1.0, 2.0}) {
+                QVERIFY(titlebar->setProperty("device_pixel_ratio", ratio));
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                for (const char* name : {"title_label", "title_editor", "activity_marker_label",
+                                        "vnm_mark_pid_caption", "vnm_mark_pid_edit"})
+                {
+                    QObject* text = find_descendant(root.get(), QString::fromUtf8(name));
+                    QVERIFY(text != nullptr);
+                    const QFont font = text->property("font").value<QFont>();
+                    QCOMPARE(font.pixelSize(), role_font.pixelSize());
+                    QCOMPARE(font.pointSizeF(), role_font.pointSizeF());
+                }
+                auto* editor = find_item(root.get(), QStringLiteral("title_editor"));
+                auto* pid_text = find_item(root.get(), QStringLiteral("vnm_mark_pid_edit"));
+                QVERIFY(editor && pid_text);
+                QVERIFY(editor_frame->implicitHeight() >= editor->implicitHeight() + 6);
+                QVERIFY(pill->height() >= pid_text->implicitHeight() + 4);
+                QVERIFY(titlebar->implicitHeight() >= editor_frame->implicitHeight() + 8);
+                QCOMPARE(shell->property("titlebar_height").toReal(), titlebar->implicitHeight());
+            }
+        }
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "override_height"));
+        QGuiApplication::setFont(original_font);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QCOMPARE(shell->property("titlebar_height").toReal(), 44.0);
+    }
+
     void system_window_toggles_topmost_hint_without_dropping_other_flags()
     {
         vnm_qml_chrome::System_window system_window;
@@ -1482,6 +1553,18 @@ Item {
         QVERIFY(has_property(round_button, "label"));
         QVERIFY(has_property(round_button, "tooltip_text"));
         QVERIFY(has_signal(round_button, "clicked()"));
+        QObject* round_tooltip = find_descendant(round_button, QStringLiteral("round_button_tooltip"));
+        QVERIFY(round_tooltip != nullptr);
+        QCOMPARE(round_tooltip->property("delay").toInt(), 350);
+        round_tooltip->property("contentItem");
+        round_tooltip->property("background");
+        QObject* round_tooltip_text = find_descendant(round_tooltip, QStringLiteral("chrome_tooltip_text"));
+        QObject* round_tooltip_background = find_descendant(round_tooltip, QStringLiteral("chrome_tooltip_background"));
+        QVERIFY(round_tooltip_text && round_tooltip_background);
+        QCOMPARE(object_color(round_tooltip_text, "color"), QColor(Qt::white));
+        QObject* round_border = round_tooltip_background->property("border").value<QObject*>();
+        QVERIFY(round_border != nullptr);
+        QCOMPARE(round_border->property("width").toReal(), 0.0);
 
         QObject* dark_button = find_descendant(root.get(), QStringLiteral("dark_button"));
         QVERIFY(dark_button != nullptr);
@@ -2831,6 +2914,7 @@ ApplicationWindow {
     height: 60
     visible: false
     font.family: "Inherited Chrome Font"
+    font.pointSize: 12
     font.styleName: "Inherited Chrome Style"
     font.weight: Font.DemiBold
     font.hintingPreference: Font.PreferFullHinting
@@ -2841,13 +2925,13 @@ ApplicationWindow {
     Label {
         objectName: "reference_title_label"
         visible: false
-        font.pointSize: 9.5
+        font.pointSize: 12 * 19 / 18
     }
 
     TextInput {
         objectName: "reference_title_editor"
         visible: false
-        font.pointSize: 9.5
+        font.pointSize: 12 * 19 / 18
     }
 
     VNM_ChromeTheme {
@@ -2926,9 +3010,32 @@ ApplicationWindow {
         compare_font_contract(
             object_font(title_editor), object_font(reference_title_editor));
 
+        updated_window_font.setPixelSize(24);
+        QVERIFY(root->setProperty("font", updated_window_font));
+        QFont expected_pixel_title_font = object_font(reference_title_label);
+        QFont expected_pixel_editor_font = object_font(reference_title_editor);
+        expected_pixel_title_font.setPixelSize(25);
+        expected_pixel_editor_font.setPixelSize(25);
+        compare_font_contract(object_font(title_label), expected_pixel_title_font);
+        compare_font_contract(object_font(title_editor), expected_pixel_editor_font);
+        updated_window_font.setPointSizeF(12);
+        QVERIFY(root->setProperty("font", updated_window_font));
+
         auto* mark = qobject_cast<QQuickItem*>(
             find_descendant(root.get(), QStringLiteral("vnm_animated_mark")));
         QVERIFY(mark != nullptr);
+        for (const qreal ratio : {1.0, 2.0}) {
+            QVERIFY(titlebar->setProperty("device_pixel_ratio", ratio));
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            for (const char* name : {"title_label", "title_editor", "activity_marker_label",
+                                    "vnm_mark_pid_caption", "vnm_mark_pid_edit"})
+            {
+                QObject* text = find_descendant(root.get(), QString::fromUtf8(name));
+                QVERIFY(text != nullptr);
+                QCOMPARE(object_font(text).pointSizeF(), 12 * 19.0 / 18.0);
+                QCOMPARE(object_font(text).pixelSize(), -1);
+            }
+        }
         QVERIFY(mark->isVisible());
         QCOMPARE(titlebar->property("mark_pid_reveal_enabled").toBool(), true);
         QCOMPARE(mark->property("pid_reveal_enabled").toBool(), true);
@@ -3397,6 +3504,20 @@ Item {
         QVERIFY(nearly_equal(probe->width(), 40.0));
         QVERIFY(probe->height() > 0.0);
 
+        QObject* tooltip = find_descendant(probe, QStringLiteral("custom_button_tooltip"));
+        QVERIFY(tooltip != nullptr);
+        QCOMPARE(tooltip->property("text").toString(), QStringLiteral("Probe"));
+        QCOMPARE(tooltip->property("delay").toInt(), 500);
+        tooltip->property("contentItem");
+        tooltip->property("background");
+        QObject* tooltip_text = find_descendant(tooltip, QStringLiteral("chrome_tooltip_text"));
+        QObject* tooltip_background = find_descendant(tooltip, QStringLiteral("chrome_tooltip_background"));
+        QVERIFY(tooltip_text && tooltip_background);
+        QCOMPARE(object_color(tooltip_text, "color"), QColor(Qt::white));
+        QObject* border = tooltip_background->property("border").value<QObject*>();
+        QVERIFY(border != nullptr);
+        QCOMPARE(border->property("width").toReal(), 0.0);
+
         // The custom button sits to the left of the window controls, flush.
         auto* button_row = qobject_cast<QQuickItem*>(
             find_descendant(root.get(), QStringLiteral("titlebar_buttons")));
@@ -3815,10 +3936,10 @@ Item {
         QVERIFY(eye    != nullptr);
 
         QVERIFY(mark->setProperty("hover_active", true));
-        QTest::qWait(45);
         const qreal orange_target_scale =
             mark->property("orange_scale").toReal();
-        QVERIFY(orange->property("scale").toReal() > 1.0);
+        // A fixed sleep can finish before the windowless animation's first frame.
+        QTRY_VERIFY_WITH_TIMEOUT(orange->property("scale").toReal() > 1.0, 1000);
         QVERIFY(orange->property("scale").toReal() < orange_target_scale);
         QCOMPARE(mark->property("state").toString(), QStringLiteral("normal_hover"));
 
@@ -5265,8 +5386,7 @@ Window {
             QStringLiteral("vnm_title_reset.svg"));
         QTRY_COMPARE_WITH_TIMEOUT(reset_icon->property("status").toInt(), 1, 1000);
         // The row layout sizes the editor frame on its next polish.
-        QTRY_VERIFY_WITH_TIMEOUT(reset_button->width() > 0, 1000);
-        QVERIFY(editor->width() > 0);
+        QTRY_VERIFY_WITH_TIMEOUT(reset_button->width() > 0 && editor->width() > 0, 1000);
         QVERIFY(editor->x() + editor->width() <= reset_button->x());
 
         QSignalSpy accepted_spy(titlebar, SIGNAL(title_edit_accepted(QString)));
