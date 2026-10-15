@@ -120,9 +120,7 @@ public:
             application,
             &QGuiApplication::focusWindowChanged,
             this,
-            [this](QWindow*) {
-                handle_automatic_native_unlock();
-            });
+            &Foreground_lock_service::handle_automatic_native_unlock);
     }
 
     void associate_direct_target(QWindow* window)
@@ -241,30 +239,22 @@ private:
             window,
             &QWindow::flagsChanged,
             this,
-            [this](Qt::WindowFlags) {
-                refresh_native_lock();
-            });
+            &Foreground_lock_service::refresh_native_lock);
         target_it->visibility_changed = QObject::connect(
             window,
             &QWindow::visibilityChanged,
             this,
-            [this](QWindow::Visibility) {
-                refresh_native_lock();
-            });
+            &Foreground_lock_service::refresh_native_lock);
         target_it->window_state_changed = QObject::connect(
             window,
             &QWindow::windowStateChanged,
             this,
-            [this](Qt::WindowState) {
-                refresh_native_lock();
-            });
+            &Foreground_lock_service::refresh_native_lock);
         target_it->active_changed = QObject::connect(
             window,
             &QWindow::activeChanged,
             this,
-            [this]() {
-                handle_automatic_native_unlock();
-            });
+            &Foreground_lock_service::handle_automatic_native_unlock);
         target_it->destroyed = QObject::connect(
             window,
             &QObject::destroyed,
