@@ -23,6 +23,21 @@ does not change the host process's cache policy. Link the CMake target
 `vnm_qml_chrome::vnm_qml_chrome` so Qt's compiled units and resource initializers
 are retained.
 
+Call `vnm_init_qml_chrome_runtime(engine)` from
+`vnm_qml_chrome/vnm_qml_chrome_runtime.h` once per `QQmlEngine` before
+importing `VNM_Chrome`. It initializes the module's QML resources and import
+paths and registers its singletons, and returns false on a fatal
+resource-verification failure:
+
+```cpp
+QQmlApplicationEngine engine;
+if (!vnm_init_qml_chrome_runtime(engine)) {
+    return 1;
+}
+```
+
+`examples/solid_window/main.cpp` shows the complete setup.
+
 `VNM_Snapped_rectangle` is available from `VNM_Chrome 1.0` for control
 backgrounds that need their painted edges aligned to the device-pixel grid. It
 keeps the requested logical geometry and exposes `color`, `border_color`,
