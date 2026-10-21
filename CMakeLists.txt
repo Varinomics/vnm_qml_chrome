@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(vnm_qml_chrome LANGUAGES CXX VERSION 1.12.0)
+project(vnm_qml_chrome LANGUAGES CXX VERSION 1.13.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +17,9 @@ find_package(Qt6 ${vnm_qml_chrome_minimum_qt_version} REQUIRED COMPONENTS
     QuickLayouts
     QuickShapes
     QuickControls2
+    GuiPrivate
+    QuickPrivate
+    QuickTemplates2Private
     ShaderTools)
 include(cmake/vnm_cmake_dependency.cmake)
 
@@ -50,6 +53,8 @@ target_sources(vnm_qml_chrome PRIVATE
     include/vnm_qml_chrome/vnm_native_window_frame.h
     include/vnm_qml_chrome/vnm_system_window.h
     src/vnm_device_pixel_geometry_item.h
+    src/vnm_text_input_focus_controller.h
+    src/vnm_text_input_focus_controller.cpp
     src/vnm_chrome_geometry.cpp
     src/vnm_device_pixel_geometry_item.cpp
     src/vnm_native_window_frame.cpp
@@ -128,6 +133,11 @@ target_link_libraries(vnm_qml_chrome
         Qt6::QuickControls2
 )
 
+target_link_libraries(vnm_qml_chrome PRIVATE
+    Qt6::GuiPrivate
+    Qt6::QuickPrivate
+    Qt6::QuickTemplates2Private)
+
 if(WIN32)
     target_compile_definitions(vnm_qml_chrome PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(vnm_qml_chrome PRIVATE dwmapi gdi32 user32)
@@ -199,6 +209,14 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         Qt6::Test
     )
 
+    add_executable(vnm_chrome_text_input_focus_tests
+        tests/vnm_text_input_focus_tests.cpp
+    )
+    target_link_libraries(vnm_chrome_text_input_focus_tests PRIVATE
+        vnm_qml_chrome::vnm_qml_chrome
+        Qt6::Test
+    )
+
     if(BUILD_TESTING)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -230,6 +248,14 @@ if(VNM_QML_CHROME_BUILD_TESTS)
                 "QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough"
                 "${vnm_qml_chrome_qt_runtime_path}"
                 "$<TARGET_FILE:vnm_chrome_device_pixel_geometry_tests>"
+        )
+
+        add_test(
+            NAME vnm_chrome_text_input_focus_tests
+            COMMAND ${CMAKE_COMMAND} -E env
+                ${vnm_qml_chrome_qt_test_environment}
+                "${vnm_qml_chrome_qt_runtime_path}"
+                "$<TARGET_FILE:vnm_chrome_text_input_focus_tests>"
         )
 
         if(WIN32)

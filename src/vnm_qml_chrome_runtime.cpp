@@ -4,6 +4,7 @@
 #include "vnm_qml_chrome/vnm_native_window_frame.h"
 #include "vnm_qml_chrome/vnm_system_window.h"
 #include "vnm_device_pixel_geometry_item.h"
+#include "vnm_text_input_focus_controller.h"
 
 #include <QDebug>
 #include <QJSEngine>
@@ -57,6 +58,11 @@ void ensure_qml_types_registered()
             [](QQmlEngine*, QJSEngine*) -> QObject* {
                 return new vnm_qml_chrome::System_window;
             });
+        qmlRegisterType<VNM_Text_input_focus_controller>(
+            "VNM_Chrome",
+            1,
+            0,
+            "VNM_TextInputFocusController");
         qmlRegisterType<VNM_NativeWindowFrame>(
             "VNM_Chrome",
             1,

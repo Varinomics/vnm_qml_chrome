@@ -7,6 +7,6 @@ class QQmlEngine;
 /// The qrc initialization is internally guarded and safe to call from
 /// multiple engines.
 /// Also registers the VNM_chrome_geometry and VNM_system_window singletons and
-/// native frame type.
+/// native frame and VNM_TextInputFocusController types.
 /// Returns false only on fatal resource-verification failure.
 bool vnm_init_qml_chrome_runtime(QQmlEngine& engine);
