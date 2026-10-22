@@ -323,6 +323,10 @@ QQuickItem* VNM_Text_input_focus_controller::find_text_input_boundary(QQuickItem
     if (!is_within_scope(focus_item)) {
         return nullptr;
     }
+    // ApplicationWindow's public content item is inside a private QQuickControl.
+    // That window wrapper must not make a custom input item a click-away editor.
+    QQuickItem* const window_content_item = m_window
+        ? m_window->property("contentItem").value<QQuickItem*>() : nullptr;
     QQuickItem* boundary = nullptr;
     bool owns_editor = false;
     for (QQuickItem* item = focus_item; item; item = item->parentItem()) {
@@ -355,7 +359,7 @@ QQuickItem* VNM_Text_input_focus_controller::find_text_input_boundary(QQuickItem
         if (boundary && !m_include_controls) {
             return boundary;
         }
-        if (item == m_scope) {
+        if (item == m_scope || item == window_content_item) {
             break;
         }
     }

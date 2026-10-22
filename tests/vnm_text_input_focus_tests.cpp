@@ -1,6 +1,7 @@
 #include "vnm_qml_chrome/vnm_qml_chrome_runtime.h"
 
 #include <QCoreApplication>
+#include <QPointingDevice>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -17,6 +18,160 @@ class VNM_Chrome_text_input_focus_tests : public QObject
     Q_OBJECT
 
 private slots:
+    void application_window_overlay_preserves_custom_input_focus_data()
+    {
+        QTest::addColumn<bool>("use_touch");
+        QTest::newRow("mouse") << false;
+        QTest::newRow("touch") << true;
+    }
+
+    void application_window_overlay_preserves_custom_input_focus()
+    {
+        QFETCH(bool, use_touch);
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Controls.Basic
+import VNM_Chrome
+
+ApplicationWindow {
+    id: window
+    visible: true
+    width: 700
+    height: 500
+    property int key_press_count: 0
+
+    VNM_TextInputFocusController {
+        window: window
+        include_controls: true
+    }
+    header: Button {
+        objectName: "header_button"
+        text: "Header action"
+    }
+    footer: Button {
+        objectName: "footer_button"
+        text: "Footer action"
+    }
+    Item {
+        id: canvas
+        objectName: "canvas"
+        anchors.fill: parent
+    }
+    TextField {
+        objectName: "field"
+        x: 20
+        y: 20
+        width: 260
+        text: "Editable field"
+    }
+    Item {
+        objectName: "keyboard"
+        parent: Overlay.overlay
+        x: 20
+        y: 320
+        width: 300
+        height: 120
+        visible: canvas.activeFocus
+
+        MultiPointTouchArea {
+            anchors.fill: parent
+            minimumTouchPoints: 1
+            maximumTouchPoints: 1
+            mouseEnabled: true
+            onPressed: window.key_press_count += 1
+        }
+    }
+    Popup {
+        objectName: "form"
+        parent: Overlay.overlay
+        x: 350
+        y: 60
+        width: 300
+        height: 160
+        popupType: Popup.Item
+        closePolicy: Popup.CloseOnEscape
+
+        TextField {
+            objectName: "popup_field"
+            width: 260
+            text: "Popup editor"
+        }
+        Button {
+            objectName: "popup_button"
+            y: 50
+            text: "Popup action"
+        }
+    }
+}
+)";
+
+        QQmlComponent component(&engine);
+        component.setData(qml_source, QUrl(QStringLiteral("qrc:/tests/application_window_focus.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+        auto* const window = qobject_cast<QQuickWindow*>(root.get());
+        QVERIFY(window != nullptr);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+
+        auto* const canvas = root->findChild<QQuickItem*>(QStringLiteral("canvas"));
+        auto* const keyboard = root->findChild<QQuickItem*>(QStringLiteral("keyboard"));
+        QObject* const form = root->findChild<QObject*>(QStringLiteral("form"));
+        QVERIFY(canvas && keyboard && form);
+        canvas->forceActiveFocus(Qt::OtherFocusReason);
+        QVERIFY(canvas->hasActiveFocus());
+        QVERIFY(keyboard->isVisible());
+        const QPoint key_position = keyboard->mapToScene(
+            QPointF(keyboard->width() / 2, keyboard->height() / 2)).toPoint();
+        const std::unique_ptr<QPointingDevice> touch_device(
+            use_touch ? QTest::createTouchDevice() : nullptr);
+
+        // A custom input canvas owns its keyboard focus. The window's private
+        // Controls wrapper must not turn it into a click-away editor.
+        for (int press_count = 1; press_count <= 2; ++press_count) {
+            if (use_touch) {
+                QTest::touchEvent(window, touch_device.get()).press(0, key_position, window).commit();
+                QTest::touchEvent(window, touch_device.get()).release(0, key_position, window).commit();
+            }
+            else {
+                QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, key_position);
+            }
+            QCoreApplication::processEvents();
+            QCOMPARE(window->property("key_press_count").toInt(), press_count);
+            QVERIFY(canvas->hasActiveFocus());
+            QVERIFY(keyboard->isVisible());
+        }
+
+        const auto click_blank = [window] {
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(670, 440));
+        };
+        for (const char* name : {"field", "header_button", "footer_button"}) {
+            auto* const control = root->findChild<QQuickItem*>(QString::fromLatin1(name));
+            QVERIFY(control != nullptr);
+            control->forceActiveFocus(Qt::TabFocusReason);
+            QVERIFY(control->hasActiveFocus());
+            click_blank();
+            QTRY_VERIFY(!control->hasFocus());
+        }
+
+        QVERIFY(QMetaObject::invokeMethod(form, "open"));
+        QTRY_VERIFY(form->property("opened").toBool());
+        for (const char* name : {"popup_field", "popup_button"}) {
+            auto* const control = root->findChild<QQuickItem*>(QString::fromLatin1(name));
+            QVERIFY(control != nullptr);
+            control->forceActiveFocus(Qt::TabFocusReason);
+            QVERIFY(control->hasActiveFocus());
+            click_blank();
+            QTRY_VERIFY(!control->hasFocus());
+            QVERIFY(form->property("visible").toBool());
+        }
+    }
+
     void scoped_editors_and_controls_keep_independent_focus()
     {
         QQmlEngine engine;
