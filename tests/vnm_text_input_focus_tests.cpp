@@ -396,6 +396,108 @@ Window {
         QCOMPARE(controller->property("window").value<QQuickWindow*>(), nullptr);
     }
 
+    void toolbar_menu_preserves_nested_control_pointer_gesture()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import QtQuick.Controls.Basic
+import VNM_Chrome
+
+Window {
+    id: window
+    visible: true
+    width: 500
+    height: 360
+
+    VNM_TextInputFocusController {
+        window: window
+        include_controls: true
+    }
+    ToolBar {
+        objectName: "toolbar"
+        x: 20
+        y: 20
+        width: 360
+        height: 100
+
+        Button {
+            id: opener
+            objectName: "opener"
+            x: 10
+            y: 10
+            text: "Options"
+            onClicked: choices.popup(opener, 0, height)
+        }
+        Item {
+            objectName: "passive_content"
+            x: 220
+            y: 10
+            width: 80
+            height: 50
+        }
+    }
+    Menu {
+        id: choices
+        objectName: "choices"
+        parent: opener
+        popupType: Popup.Item
+
+        MenuItem {
+            objectName: "choice"
+            text: "Automatic"
+        }
+    }
+}
+)";
+
+        QQmlComponent component(&engine);
+        component.setData(qml_source, QUrl(QStringLiteral("qrc:/tests/toolbar_menu_focus.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+        auto* const window = qobject_cast<QQuickWindow*>(root.get());
+        QVERIFY(window != nullptr);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+
+        auto* const toolbar = root->findChild<QQuickItem*>(QStringLiteral("toolbar"));
+        auto* const opener = root->findChild<QQuickItem*>(QStringLiteral("opener"));
+        auto* const passive_content = root->findChild<QQuickItem*>(QStringLiteral("passive_content"));
+        QObject* const choices = root->findChild<QObject*>(QStringLiteral("choices"));
+        auto* const choice = root->findChild<QQuickItem*>(QStringLiteral("choice"));
+        QVERIFY(toolbar && opener && passive_content && choices && choice);
+        const auto click = [window](QQuickItem* item) {
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+        };
+
+        opener->forceActiveFocus(Qt::TabFocusReason);
+        QVERIFY(opener->hasActiveFocus());
+        click(passive_content);
+        QTRY_VERIFY(!opener->hasFocus());
+        QTRY_VERIFY(toolbar->hasActiveFocus());
+
+        QSignalSpy triggered(choice, SIGNAL(triggered()));
+        QVERIFY(triggered.isValid());
+        click(opener);
+        QTRY_VERIFY(choices->property("opened").toBool());
+        click(choice);
+        QTRY_COMPARE(triggered.count(), 1);
+        QTRY_VERIFY(!choices->property("visible").toBool());
+
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(450, 300));
+        QTRY_VERIFY(!opener->hasFocus());
+        QTest::keyClick(window, Qt::Key_Space);
+        QCoreApplication::processEvents();
+        QVERIFY(!choices->property("visible").toBool());
+        QCOMPARE(triggered.count(), 1);
+    }
+
     void independent_popup_control_clears_focus_on_blank_press()
     {
         QQmlEngine engine;

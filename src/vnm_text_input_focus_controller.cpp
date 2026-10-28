@@ -986,8 +986,11 @@ void VNM_Text_input_focus_controller::resolve_pending_pointer_presses()
     std::vector<Editor_context> contexts;
     for (const Pending_pointer_press& press : pending_presses) {
         for (const Editor_context& context : press.contexts) {
+            // A focused control can retain its containing focus scopes. Ending
+            // those ancestor contexts would also cancel the control's gesture.
             if (context.focus_item &&
-                (clear_all || find_text_input_boundary(context.focus_item) != preserved_boundary))
+                (clear_all || !is_descendant_or_self(
+                    preserved_boundary, find_text_input_boundary(context.focus_item))))
             {
                 contexts.push_back(context);
             }
@@ -1036,9 +1039,10 @@ QQuickItem* VNM_Text_input_focus_controller::pointer_press_editor_boundary(
 
         QQuickItem* grabber_boundary = nullptr;
         for (const Editor_record& record : m_editor_records) {
-            if (is_descendant_or_self(target_item, record.boundary)) {
+            if (is_descendant_or_self(target_item, record.boundary) &&
+                (!grabber_boundary || is_descendant_or_self(record.boundary, grabber_boundary)))
+            {
                 grabber_boundary = record.boundary;
-                break;
             }
         }
         if (!grabber_boundary ||
