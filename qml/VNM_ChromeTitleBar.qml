@@ -138,6 +138,7 @@ Rectangle {
             ? titlebar.Window.window.activeFocusItem
             : null
         title_editor.text = titlebar.title
+        title_editor.initial_text = title_editor.text
         title_editor_frame.visible = true
         title_editor.forceActiveFocus()
         title_editor.selectAll()
@@ -161,8 +162,12 @@ Rectangle {
         }
 
         const accepted_title = title_editor.text
+        // The owner's live title can change while this edit is open.
+        const title_changed = accepted_title !== title_editor.initial_text
         finish_title_edit(restore_previous_focus)
-        titlebar.title_edit_accepted(accepted_title)
+        if (title_changed) {
+            titlebar.title_edit_accepted(accepted_title)
+        }
     }
 
     function cancel_title_edit() {
@@ -441,6 +446,7 @@ Rectangle {
                 objectName: "title_editor"
 
                 property Item previous_focus_item: null
+                property string initial_text: ""
                 property bool finishing_edit: false
 
                 anchors.fill: parent

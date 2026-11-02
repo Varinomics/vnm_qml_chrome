@@ -67,9 +67,13 @@ independently; safe acquisition and release cannot otherwise be coordinated.
 
 `VNM_ChromeTitleBar` and `VNM_ChromeFrameShell` can opt into user-edited
 window titles with `title_editing_enabled: true`. Alt+left-click starts editing;
-Enter or moving focus away emits `title_edit_accepted(title)` so the owning
-application can apply the accepted value. While editing, the available title
-region is presented as a text box. The Varinomics mark stays in its Alt pose
+Enter or moving focus away closes the editor and emits
+`title_edit_accepted(title)` only when the final text differs from the text at
+the start of that edit. Changes to the owner's live title while editing do not
+replace the draft or its starting text, and starting an already-open edit
+preserves both. The owning application applies genuine edits; accepting
+unchanged text leaves its title policy intact. While editing, the available
+title region is presented as a text box. The Varinomics mark stays in its Alt pose
 unless the always-on-top eye is active; the latched eye intentionally takes
 precedence. The capability is disabled by default.
 
