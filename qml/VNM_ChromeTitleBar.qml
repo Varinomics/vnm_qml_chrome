@@ -138,6 +138,7 @@ Rectangle {
             ? titlebar.Window.window.activeFocusItem
             : null
         title_editor.text = titlebar.title
+        title_editor.initial_text = title_editor.text
         title_editor_frame.visible = true
         title_editor.forceActiveFocus()
         title_editor.selectAll()
@@ -161,8 +162,12 @@ Rectangle {
         }
 
         const accepted_title = title_editor.text
+        // The owner's live title can change while this edit is open.
+        const title_changed = accepted_title !== title_editor.initial_text
         finish_title_edit(restore_previous_focus)
-        titlebar.title_edit_accepted(accepted_title)
+        if (title_changed) {
+            titlebar.title_edit_accepted(accepted_title)
+        }
     }
 
     function cancel_title_edit() {
@@ -441,11 +446,12 @@ Rectangle {
                 objectName: "title_editor"
 
                 property Item previous_focus_item: null
+                property string initial_text: ""
                 property bool finishing_edit: false
 
                 anchors.fill: parent
                 anchors.leftMargin: 6
-                anchors.rightMargin: title_reset_button.visible
+                rightPadding: title_reset_button.visible
                     ? title_reset_button.width
                     : 6
                 visible: title_editor_frame.visible
@@ -472,14 +478,15 @@ Rectangle {
                 id: title_reset_button
                 objectName: "title_reset_button"
 
+                parent: title_editor
                 anchors.top: parent.top
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 width: height
                 visible: titlebar.title_reset_available
                 hoverEnabled: true
-                // A MouseArea takes no focus, so a press leaves the editor
-                // focused instead of accepting the draft on focus loss.
+                // Keep the badge inside the input's click-away boundary so
+                // focus clearing cannot hide it before the click is delivered.
                 onClicked: titlebar.request_title_reset()
 
                 // Loaded only while shown, because the icon samples its window

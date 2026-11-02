@@ -5353,8 +5353,143 @@ Window {
         QCOMPARE(titlebar->property("title").toString(), QStringLiteral("Process title"));
     }
 
+    void title_edit_acceptance_uses_the_starting_text_data()
+    {
+        QTest::addColumn<QString>("live_title");
+        QTest::addColumn<QString>("edited_title");
+        QTest::addColumn<bool>("edit_text");
+        QTest::addColumn<bool>("restore_text");
+        QTest::addColumn<bool>("focus_loss");
+        QTest::addColumn<bool>("reenter");
+        QTest::addColumn<bool>("submit");
+        const QString original = QStringLiteral("Process title");
+        const QString updated  = QStringLiteral("Running checks");
+        const QString manual   = QStringLiteral("My workspace");
+        QTest::newRow("untouched-enter")
+            << original << original << false << false << false << false << false;
+        QTest::newRow("untouched-focus-loss")
+            << original << original << false << false << true << false << false;
+        QTest::newRow("automatic-change-enter")
+            << updated << original << false << false << false << true << false;
+        QTest::newRow("automatic-change-focus-loss")
+            << updated << original << false << false << true << false << false;
+        QTest::newRow("edit-restored-to-start")
+            << updated << manual << true << true << false << false << false;
+        QTest::newRow("genuine-edit-enter")
+            << original << manual << true << false << false << false << true;
+        QTest::newRow("genuine-edit-focus-loss")
+            << updated << manual << true << false << true << false << true;
+        QTest::newRow("genuine-edit-matches-live-title")
+            << updated << updated << true << false << false << true << true;
+        QTest::newRow("empty-edit")
+            << updated << QString{} << true << false << false << false << true;
+    }
+
+    void title_edit_acceptance_uses_the_starting_text()
+    {
+        QFETCH(QString, live_title);
+        QFETCH(QString, edited_title);
+        QFETCH(bool, edit_text);
+        QFETCH(bool, restore_text);
+        QFETCH(bool, focus_loss);
+        QFETCH(bool, reenter);
+        QFETCH(bool, submit);
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        static const char qml_source[] = R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+Window {
+    width: 420
+    height: 100
+    visible: true
+
+    VNM_ChromeFrameShell {
+        objectName: "shell"
+        anchors.fill: parent
+        title: "Process title"
+        title_editing_enabled: true
+
+        Item { objectName: "focus_sink" }
+    }
+}
+)";
+        std::unique_ptr<QObject> root = create_qml_object(
+            engine, qml_source, "qrc:/tests/title_edit_starting_text.qml");
+        QVERIFY(root != nullptr);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        auto* shell = find_descendant(root.get(), QStringLiteral("shell"));
+        auto* titlebar = find_descendant(root.get(), QStringLiteral("chrome_frame_shell_titlebar"));
+        auto* editor = find_item(root.get(), QStringLiteral("title_editor"));
+        auto* editor_frame = find_item(root.get(), QStringLiteral("title_editor_frame"));
+        auto* focus_sink = find_item(root.get(), QStringLiteral("focus_sink"));
+        QVERIFY(window && shell && titlebar && editor && editor_frame && focus_sink);
+        QSignalSpy accepted(titlebar, SIGNAL(title_edit_accepted(QString)));
+        QSignalSpy forwarded(shell, SIGNAL(title_edit_accepted(QString)));
+        QVERIFY(accepted.isValid());
+        QVERIFY(forwarded.isValid());
+
+        focus_sink->forceActiveFocus();
+        QTRY_VERIFY(focus_sink->hasActiveFocus());
+        QVERIFY(QMetaObject::invokeMethod(titlebar, "begin_title_edit"));
+        QTRY_VERIFY(editor->hasActiveFocus());
+        const QString original = QStringLiteral("Process title");
+        QCOMPARE(editor->property("text").toString(), original);
+        QVERIFY(shell->setProperty("title", live_title));
+        QCOMPARE(editor->property("text").toString(), original);
+        QVERIFY(editor_frame->isVisible());
+        QVERIFY(editor->hasActiveFocus());
+        if (edit_text) {
+            QVERIFY(editor->setProperty("text", edited_title));
+        }
+        if (restore_text) {
+            QVERIFY(editor->setProperty("text", original));
+        }
+        const QString draft = editor->property("text").toString();
+        if (reenter) {
+            QVERIFY(QMetaObject::invokeMethod(titlebar, "begin_title_edit"));
+            QCOMPARE(editor->property("text").toString(), draft);
+        }
+        if (focus_loss) {
+            focus_sink->forceActiveFocus();
+        }
+        else {
+            QTest::keyClick(window, Qt::Key_Return);
+        }
+        QTRY_VERIFY(!editor_frame->isVisible());
+        QCOMPARE(accepted.size(), submit ? 1 : 0);
+        QCOMPARE(forwarded.size(), accepted.size());
+        if (submit) {
+            QCOMPARE(accepted.front().front().toString(), draft);
+            QCOMPARE(forwarded.front().front().toString(), draft);
+        }
+        QCOMPARE(shell->property("title").toString(), live_title);
+        QTRY_VERIFY(focus_sink->hasActiveFocus());
+
+        // A new edit owns a new baseline even when the preceding edit changed it.
+        const QString next_title = QStringLiteral("Build complete");
+        QVERIFY(shell->setProperty("title", next_title));
+        QVERIFY(QMetaObject::invokeMethod(titlebar, "begin_title_edit"));
+        QTRY_VERIFY(editor->hasActiveFocus());
+        QCOMPARE(editor->property("text").toString(), next_title);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(!editor_frame->isVisible());
+        QCOMPARE(accepted.size(), submit ? 1 : 0);
+        QCOMPARE(forwarded.size(), accepted.size());
+    }
+
+    void titlebar_title_reset_badge_requests_reset_without_accepting_the_draft_data()
+    {
+        QTest::addColumn<QString>("draft");
+        QTest::newRow("unchanged-custom-title") << QStringLiteral("Build logs");
+        QTest::newRow("edited-draft") << QStringLiteral("Draft title");
+    }
+
     void titlebar_title_reset_badge_requests_reset_without_accepting_the_draft()
     {
+        QFETCH(QString, draft);
         QQmlEngine engine;
         QVERIFY(vnm_init_qml_chrome_runtime(engine));
 
@@ -5364,9 +5499,17 @@ import QtQuick.Window
 import VNM_Chrome
 
 Window {
+    id: root
+
     width: 420
     height: 48
     visible: true
+
+    VNM_TextInputFocusController {
+        window: root
+        scope: root.contentItem
+        include_controls: true
+    }
 
     VNM_ChromeTitleBar {
         objectName: "chrome_titlebar"
@@ -5401,6 +5544,8 @@ Window {
         QVERIFY(editor       != nullptr);
         QVERIFY(reset_button != nullptr);
 
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
         QVERIFY(QMetaObject::invokeMethod(focus_sink, "forceActiveFocus"));
         QTRY_VERIFY_WITH_TIMEOUT(focus_sink->property("activeFocus").toBool(), 1000);
         QVariant began_editing;
@@ -5423,13 +5568,15 @@ Window {
         QTRY_COMPARE_WITH_TIMEOUT(reset_icon->property("status").toInt(), 1, 1000);
         // The row layout sizes the editor frame on its next polish.
         QTRY_VERIFY_WITH_TIMEOUT(reset_button->width() > 0 && editor->width() > 0, 1000);
-        QVERIFY(editor->x() + editor->width() <= reset_button->x());
-
         QSignalSpy accepted_spy(titlebar, SIGNAL(title_edit_accepted(QString)));
         QSignalSpy reset_spy(titlebar, SIGNAL(title_reset_requested()));
         QVERIFY(accepted_spy.isValid());
         QVERIFY(reset_spy.isValid());
-        QVERIFY(editor->setProperty("text", QStringLiteral("Draft title")));
+        const QPointF editor_center = editor->mapToScene(
+            QPointF(editor->width() / 2.0, editor->height() / 2.0));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, editor_center.toPoint());
+        QTRY_VERIFY_WITH_TIMEOUT(editor->hasActiveFocus(), 1000);
+        QVERIFY(editor->setProperty("text", draft));
 
         const QPointF badge_center = reset_button->mapToScene(
             QPointF(reset_button->width() / 2.0, reset_button->height() / 2.0));
