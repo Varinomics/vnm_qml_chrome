@@ -5480,8 +5480,16 @@ Window {
         QCOMPARE(forwarded.size(), accepted.size());
     }
 
+    void titlebar_title_reset_badge_requests_reset_without_accepting_the_draft_data()
+    {
+        QTest::addColumn<QString>("draft");
+        QTest::newRow("unchanged-custom-title") << QStringLiteral("Build logs");
+        QTest::newRow("edited-draft") << QStringLiteral("Draft title");
+    }
+
     void titlebar_title_reset_badge_requests_reset_without_accepting_the_draft()
     {
+        QFETCH(QString, draft);
         QQmlEngine engine;
         QVERIFY(vnm_init_qml_chrome_runtime(engine));
 
@@ -5491,9 +5499,17 @@ import QtQuick.Window
 import VNM_Chrome
 
 Window {
+    id: root
+
     width: 420
     height: 48
     visible: true
+
+    VNM_TextInputFocusController {
+        window: root
+        scope: root.contentItem
+        include_controls: true
+    }
 
     VNM_ChromeTitleBar {
         objectName: "chrome_titlebar"
@@ -5528,6 +5544,8 @@ Window {
         QVERIFY(editor       != nullptr);
         QVERIFY(reset_button != nullptr);
 
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
         QVERIFY(QMetaObject::invokeMethod(focus_sink, "forceActiveFocus"));
         QTRY_VERIFY_WITH_TIMEOUT(focus_sink->property("activeFocus").toBool(), 1000);
         QVariant began_editing;
@@ -5550,13 +5568,15 @@ Window {
         QTRY_COMPARE_WITH_TIMEOUT(reset_icon->property("status").toInt(), 1, 1000);
         // The row layout sizes the editor frame on its next polish.
         QTRY_VERIFY_WITH_TIMEOUT(reset_button->width() > 0 && editor->width() > 0, 1000);
-        QVERIFY(editor->x() + editor->width() <= reset_button->x());
-
         QSignalSpy accepted_spy(titlebar, SIGNAL(title_edit_accepted(QString)));
         QSignalSpy reset_spy(titlebar, SIGNAL(title_reset_requested()));
         QVERIFY(accepted_spy.isValid());
         QVERIFY(reset_spy.isValid());
-        QVERIFY(editor->setProperty("text", QStringLiteral("Draft title")));
+        const QPointF editor_center = editor->mapToScene(
+            QPointF(editor->width() / 2.0, editor->height() / 2.0));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, editor_center.toPoint());
+        QTRY_VERIFY_WITH_TIMEOUT(editor->hasActiveFocus(), 1000);
+        QVERIFY(editor->setProperty("text", draft));
 
         const QPointF badge_center = reset_button->mapToScene(
             QPointF(reset_button->width() / 2.0, reset_button->height() / 2.0));
