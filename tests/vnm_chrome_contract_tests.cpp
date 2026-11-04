@@ -16,8 +16,10 @@
 #include <QPointF>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QQmlProperty>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QRegularExpression>
 #include <QResource>
 #include <QScopeGuard>
 #include <QSignalSpy>
@@ -108,6 +110,30 @@ std::unique_ptr<QObject> create_qml_object(
     }
 
     return std::unique_ptr<QObject>(component.create());
+}
+
+std::unique_ptr<QObject> create_pid_settle_test_mark(QQmlEngine& engine)
+{
+    QTest::failOnWarning(QRegularExpression(QStringLiteral(".*")));
+    // Hold the geometry explicitly in these tests, without relying on an
+    // animation frame landing on one side of a readiness tolerance.
+    static const char qml_source[] = R"(
+import QtQuick
+import VNM_Chrome
+
+VNM_AnimatedMark {
+    mark_size: 20
+    state: "normal_hover"
+    transitions: []
+    property int elongation_count: 0
+    onPid_phaseChanged: {
+        if (pid_phase === "elongating")
+            elongation_count += 1
+    }
+}
+)";
+    return create_qml_object(
+        engine, qml_source, "qrc:/tests/animated_mark_pid_settle_contract.qml");
 }
 
 bool has_property(QObject* object, const char* property_name)
@@ -4513,6 +4539,167 @@ VNM_AnimatedMark {
         QVERIFY(near_white_count > 0);
     }
 
+    void animated_mark_pid_reveal_starts_immediately_when_already_settled()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        auto mark = create_pid_settle_test_mark(engine);
+        QVERIFY(mark != nullptr);
+
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        // No event-loop turn, timer or further geometry change is needed.
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("elongating"));
+        QCOMPARE(mark->property("elongation_count").toInt(), 1);
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mark->property("elongation_count").toInt(), 1);
+    }
+
+    void animated_mark_pid_settlement_preserves_geometry_tolerances_data()
+    {
+        QTest::addColumn<QByteArray>("geometry_property");
+        QTest::addColumn<qreal>("tolerance");
+        QTest::newRow("scale") << QByteArray("scale") << qreal(0.01);
+        QTest::newRow("offset") << QByteArray("circle_x_offset") << qreal(0.05);
+        QTest::newRow("radius") << QByteArray("radius") << qreal(0.05);
+    }
+
+    void animated_mark_pid_settlement_preserves_geometry_tolerances()
+    {
+        QFETCH(QByteArray, geometry_property);
+        QFETCH(qreal, tolerance);
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        auto mark = create_pid_settle_test_mark(engine);
+        QVERIFY(mark != nullptr);
+        auto* orange = find_descendant(mark.get(), QStringLiteral("vnm_mark_orange"));
+        QVERIFY(orange != nullptr);
+        const qreal target = orange->property(geometry_property.constData()).toReal();
+        const QQmlProperty geometry(orange, QString::fromLatin1(geometry_property));
+
+        QVERIFY(geometry.write(target + tolerance + 0.001));
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+        QCOMPARE(mark->property("elongation_count").toInt(), 0);
+
+        // Crossing the threshold is enough; no animation finishes here and
+        // the value deliberately remains short of its exact target.
+        QVERIFY(geometry.write(target + tolerance - 0.001));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(), QStringLiteral("elongating"), 1000);
+        QCOMPARE(mark->property("elongation_count").toInt(), 1);
+    }
+
+    void animated_mark_pid_settlement_uses_current_width_after_resize()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        auto mark = create_pid_settle_test_mark(engine);
+        QVERIFY(mark != nullptr);
+        auto* orange = find_descendant(mark.get(), QStringLiteral("vnm_mark_orange"));
+        QVERIFY(orange != nullptr);
+        const qreal original_width = orange->property("width").toReal();
+        const qreal original_radius = orange->property("radius").toReal();
+        const qreal target_scale = orange->property("scale").toReal();
+
+        // Remove the fixture's radius binding so a resize can change its
+        // target without also moving the held animated value.
+        QVERIFY(QQmlProperty::write(orange, "radius", original_radius));
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale + 0.02));
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QVERIFY(mark->setProperty("mark_size", 40.0));
+        QVERIFY(orange->property("width").toReal() > original_width);
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale));
+        QCoreApplication::processEvents();
+        QCOMPARE(orange->property("radius").toReal(), original_radius);
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+
+        // Only a target dependency changes. The animated scale, offset and
+        // radius do not notify again, so a cached target would miss this.
+        QVERIFY(QQmlProperty::write(orange, "width", original_width));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(), QStringLiteral("elongating"), 1000);
+        QCOMPARE(mark->property("elongation_count").toInt(), 1);
+    }
+
+    void animated_mark_pid_settlement_requires_normal_hover_state()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        auto mark = create_pid_settle_test_mark(engine);
+        QVERIFY(mark != nullptr);
+        auto* orange = find_descendant(mark.get(), QStringLiteral("vnm_mark_orange"));
+        QVERIFY(orange != nullptr);
+        const qreal scale = orange->property("scale").toReal();
+        const qreal radius = orange->property("radius").toReal();
+        const qreal offset = orange->property("circle_x_offset").toReal();
+        QVERIFY(mark->setProperty("state", QString()));
+        QVERIFY(QQmlProperty::write(orange, "scale", scale));
+        QVERIFY(QQmlProperty::write(orange, "radius", radius));
+        QVERIFY(QQmlProperty::write(orange, "circle_x_offset", offset));
+
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+        QVERIFY(mark->setProperty("state", QStringLiteral("normal_hover")));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(), QStringLiteral("elongating"), 1000);
+        QCOMPARE(mark->property("elongation_count").toInt(), 1);
+    }
+
+    void animated_mark_pid_pending_settlement_is_request_and_lifetime_bound()
+    {
+        QQmlEngine engine;
+        QVERIFY(vnm_init_qml_chrome_runtime(engine));
+        auto mark = create_pid_settle_test_mark(engine);
+        QVERIFY(mark != nullptr);
+        auto* orange = find_descendant(mark.get(), QStringLiteral("vnm_mark_orange"));
+        QVERIFY(orange != nullptr);
+        const qreal target_scale = orange->property("scale").toReal();
+
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale + 0.02));
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale));
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "dismiss_pid_reveal"));
+        QCOMPARE(mark->property("pid_phase").toString(), QString());
+
+        // Start a new, still-unsettled request before queued work from the
+        // cancelled one can run. It must not inherit the earlier readiness.
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale + 0.02));
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+        QCOMPARE(mark->property("elongation_count").toInt(), 0);
+
+        // Even within one request, readiness can disappear before delivery.
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale));
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale + 0.02));
+        QCoreApplication::processEvents();
+        QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            mark->property("pid_phase").toString(), QStringLiteral("elongating"), 1000);
+        QVERIFY(QMetaObject::invokeMethod(mark.get(), "request_pid_reveal"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mark->property("elongation_count").toInt(), 1);
+        mark.reset();
+
+        auto doomed = create_pid_settle_test_mark(engine);
+        QVERIFY(doomed != nullptr);
+        orange = find_descendant(doomed.get(), QStringLiteral("vnm_mark_orange"));
+        QVERIFY(orange != nullptr);
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale + 0.02));
+        QVERIFY(QMetaObject::invokeMethod(doomed.get(), "request_pid_reveal"));
+        QVERIFY(QQmlProperty::write(orange, "scale", target_scale));
+        doomed.reset(); // Destroy while a readiness notification is queued.
+        auto replacement = create_pid_settle_test_mark(engine);
+        QVERIFY(replacement != nullptr);
+        QCoreApplication::processEvents();
+        QCOMPARE(replacement->property("pid_phase").toString(), QString());
+        QCOMPARE(replacement->property("elongation_count").toInt(), 0);
+    }
+
     void animated_mark_reveals_process_id_pill_on_request()
     {
         QQmlEngine engine;
@@ -4775,6 +4962,14 @@ Window {
             5000);
         QVERIFY(focus_after->hasActiveFocus());
 
+        // The preceding reveals left hover settled. Start a real hover
+        // transition so this last case still disables during forming.
+        QVERIFY(mark->setProperty("hover_active", false));
+        auto* orange = find_descendant(mark, QStringLiteral("vnm_mark_orange"));
+        QVERIFY(orange != nullptr);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(orange->property("scale").toReal() - 1.0) < 0.01, 1000);
+        QVERIFY(mark->setProperty("hover_active", true));
         QVERIFY(mark->setProperty("pid_reveal_enabled", true));
         QVERIFY(QMetaObject::invokeMethod(mark, "request_pid_reveal"));
         QCOMPARE(mark->property("pid_phase").toString(), QStringLiteral("forming"));
