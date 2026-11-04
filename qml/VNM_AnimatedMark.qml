@@ -27,6 +27,9 @@ Item {
     // Reveal lifecycle: "" -> "forming" -> "elongating" -> "revealed"
     // -> "retracting" -> "".
     property string pid_phase: ""
+    property int pid_reveal_generation: 0
+    readonly property bool pid_circle_settled:
+        pid_phase === "forming" && circle_settled()
     property bool pid_pill_growing: true
     readonly property bool pid_pill_active:
         pid_phase === "elongating"
@@ -266,10 +269,20 @@ Item {
             return
         }
 
+        const generation = ++pid_reveal_generation
         pid_edit.previous_focus_item = null
         pid_phase = "forming"
         icon_press_area.stay_on_top_press_candidate = false
-        pid_circle_settle_timer.start()
+        // The circle may already be settled, with no later geometry change.
+        maybe_begin_pid_elongation(generation)
+    }
+
+    function maybe_begin_pid_elongation(generation) {
+        if (generation === pid_reveal_generation
+            && pid_phase === "forming"
+            && circle_settled()) {
+            begin_pid_elongation()
+        }
     }
 
     function cancel_pid_reveal() {
@@ -277,7 +290,6 @@ Item {
             return
         }
 
-        pid_circle_settle_timer.stop()
         pid_edit.previous_focus_item = null
         pid_phase = ""
     }
@@ -398,6 +410,15 @@ Item {
     onPid_reveal_enabledChanged: {
         if (!pid_reveal_enabled) {
             dismiss_pid_reveal()
+        }
+    }
+
+    onPid_circle_settledChanged: {
+        if (pid_circle_settled) {
+            // Leave the readiness binding before changing its phase dependency.
+            // The named callback follows this object's lifetime; its generation
+            // and a fresh predicate check reject cancelled or retargeted work.
+            Qt.callLater(mark.maybe_begin_pid_elongation, pid_reveal_generation)
         }
     }
 
@@ -819,24 +840,6 @@ Item {
         property: "opacity"
         duration: 240
         easing.type: Easing.InOutQuad
-    }
-
-    Timer {
-        id: pid_circle_settle_timer
-
-        interval: 30
-        repeat: true
-        onTriggered: {
-            if (mark.pid_phase !== "forming") {
-                stop()
-                return
-            }
-
-            if (mark.circle_settled()) {
-                stop()
-                mark.begin_pid_elongation()
-            }
-        }
     }
 
     states: [
