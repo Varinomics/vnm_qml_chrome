@@ -11,6 +11,8 @@ Rectangle {
     property string title: ""
     // Styling the chrome must not put markup in the window title or editor.
     property string title_rich_text: ""
+    property string secondary_title: ""
+    property color secondary_title_color: theme.titlebar_text
     property string title_font_family: ""
     property bool title_editing_enabled: false
     // Set by the owner while a user-edited title replaces its own. The title
@@ -402,18 +404,45 @@ Rectangle {
 
             Layout.alignment: Qt.AlignVCenter
             Layout.fillWidth: true
+            Layout.fillHeight: titlebar.secondary_title.length > 0
             Layout.minimumWidth: 0
             Layout.rightMargin: 8
-            text: titlebar.title_rich_text.length > 0
-                ? titlebar.title_rich_text
-                : titlebar.title
-            textFormat: titlebar.title_rich_text.length > 0
-                ? Text.StyledText
-                : Text.AutoText
+            text: titlebar.secondary_title.length > 0 || titlebar.title_rich_text.length === 0
+                ? titlebar.title
+                : titlebar.title_rich_text
+            textFormat: titlebar.secondary_title.length > 0
+                ? Text.PlainText
+                : (titlebar.title_rich_text.length > 0 ? Text.StyledText : Text.AutoText)
+            topPadding: titlebar.secondary_title.length > 0 ? 1 : 0
             color: titlebar.theme.titlebar_text
             elide: Text.ElideRight
-            font: title_font_factory.requested_font(titlebar.title_font_family)
+            font: {
+                let requested_font = title_font_factory.requested_font(titlebar.title_font_family)
+                if (titlebar.secondary_title.length > 0) {
+                    requested_font.pointSize = 10
+                }
+                return requested_font
+            }
             visible: !title_editor_frame.visible
+
+            Text {
+                objectName: "secondary_title_label"
+
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 1
+                text: titlebar.secondary_title
+                textFormat: Text.PlainText
+                color: titlebar.secondary_title_color
+                elide: Text.ElideRight
+                font: {
+                    let requested_font = title_font_factory.requested_font(titlebar.title_font_family)
+                    requested_font.pointSize = 8
+                    return requested_font
+                }
+                visible: text.length > 0
+            }
         }
 
         Item {
