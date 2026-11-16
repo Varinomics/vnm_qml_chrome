@@ -5,6 +5,7 @@
 #include "vnm_qml_chrome/vnm_system_window.h"
 #include "vnm_device_pixel_geometry_item.h"
 #include "vnm_text_input_focus_controller.h"
+#include "vnm_text_input_clipboard_notifications.h"
 
 #include <QDebug>
 #include <QJSEngine>
@@ -63,6 +64,11 @@ void ensure_qml_types_registered()
             1,
             0,
             "VNM_TextInputFocusController");
+        qmlRegisterType<VNM_Text_input_clipboard_notifications>(
+            "VNM_Chrome",
+            1,
+            0,
+            "VNM_TextInputClipboardNotifications");
         qmlRegisterType<VNM_NativeWindowFrame>(
             "VNM_Chrome",
             1,

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(vnm_qml_chrome LANGUAGES CXX VERSION 1.13.0)
+project(vnm_qml_chrome LANGUAGES CXX VERSION 1.14.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,8 @@ target_sources(vnm_qml_chrome PRIVATE
     src/vnm_device_pixel_geometry_item.h
     src/vnm_text_input_focus_controller.h
     src/vnm_text_input_focus_controller.cpp
+    src/vnm_text_input_clipboard_notifications.h
+    src/vnm_text_input_clipboard_notifications.cpp
     src/vnm_chrome_geometry.cpp
     src/vnm_device_pixel_geometry_item.cpp
     src/vnm_native_window_frame.cpp
@@ -217,6 +219,14 @@ if(VNM_QML_CHROME_BUILD_TESTS)
         Qt6::Test
     )
 
+    add_executable(vnm_chrome_text_input_clipboard_tests
+        tests/vnm_text_input_clipboard_tests.cpp
+    )
+    target_link_libraries(vnm_chrome_text_input_clipboard_tests PRIVATE
+        vnm_qml_chrome::vnm_qml_chrome
+        Qt6::Test
+    )
+
     if(BUILD_TESTING)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -256,6 +266,14 @@ if(VNM_QML_CHROME_BUILD_TESTS)
                 ${vnm_qml_chrome_qt_test_environment}
                 "${vnm_qml_chrome_qt_runtime_path}"
                 "$<TARGET_FILE:vnm_chrome_text_input_focus_tests>"
+        )
+
+        add_test(
+            NAME vnm_chrome_text_input_clipboard_tests
+            COMMAND ${CMAKE_COMMAND} -E env
+                ${vnm_qml_chrome_qt_test_environment}
+                "${vnm_qml_chrome_qt_runtime_path}"
+                "$<TARGET_FILE:vnm_chrome_text_input_clipboard_tests>"
         )
 
         if(WIN32)
