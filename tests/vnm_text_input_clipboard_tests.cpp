@@ -321,6 +321,7 @@ ApplicationWindow {
         QVERIFY(form);
         const auto clipboard = observe_clipboard();
         QVERIFY(QMetaObject::invokeMethod(form, "open"));
+        QTRY_VERIFY(form->property("opened").toBool());
         auto* const input = root->findChild<QQuickItem*>(QStringLiteral("popup_input"));
         auto* const notifications = root->findChild<QObject*>(QStringLiteral("popup_notifications"));
         QVERIFY(input && notifications);
@@ -335,6 +336,7 @@ ApplicationWindow {
         QCOMPARE(clipboard->probes, 0);
         clipboard->has_text = false;
         QVERIFY(QMetaObject::invokeMethod(form, "open"));
+        QTRY_VERIFY(form->property("opened").toBool());
         QVERIFY(!input->property("canPaste").toBool());
         clipboard->has_text = true;
         clipboard->probes = 0;
