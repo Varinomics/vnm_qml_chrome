@@ -375,6 +375,7 @@ VNM_ChromeTitleBar {
         QVERIFY(!titlebar->property("title_editing_enabled").toBool());
         QVERIFY(!editor->isVisible());
         QVERIFY(!editor->property("readOnly").toBool());
+        QCOMPARE(editor->property("persistentSelection"), QVariant(false));
         QGuiApplication::clipboard()->dataChanged();
         QCOMPARE(clipboard->probes, 0);
         QVariant began_editing;
@@ -424,30 +425,36 @@ VNM_ChromeTitleBar {
         QCOMPARE(editor->property("text").toString(), QStringLiteral("x\u03bbclipboard text"));
         QVERIFY(editor->property("canUndo").toBool());
         QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 1), Q_ARG(int, 2)));
-        const auto draft_state = editing_state(editor);
+        auto accepted_state = editing_state(editor);
+        // Finishing restores the previous focus. Qt's default nonpersistent
+        // selection collapses to the unchanged cursor on that focus loss.
+        accepted_state[QStringLiteral("selectionStart")] = accepted_state.value(QStringLiteral("cursorPosition"));
+        accepted_state[QStringLiteral("selectionEnd")] = accepted_state.value(QStringLiteral("cursorPosition"));
         QSignalSpy accepted(titlebar.get(), SIGNAL(title_edit_accepted(QString)));
         QVERIFY(accepted.isValid());
         QVERIFY(QMetaObject::invokeMethod(editor, "accepted"));
         QCOMPARE(accepted.count(), 1);
         QCOMPARE(accepted.first().first().toString(), QStringLiteral("x\u03bbclipboard text"));
         QVERIFY(!editor->isVisible());
-        QCOMPARE(editing_state(editor), draft_state);
+        QCOMPARE(editing_state(editor), accepted_state);
         QTRY_VERIFY(scene.input()->hasActiveFocus());
         clipboard->has_text = false;
         clipboard->probes = 0;
         QGuiApplication::clipboard()->dataChanged();
         QCOMPARE(clipboard->probes, 0);
-        QCOMPARE(editing_state(editor), draft_state);
+        QCOMPARE(editing_state(editor), accepted_state);
 
         QVERIFY(QMetaObject::invokeMethod(
             titlebar.get(), "begin_title_edit", Q_RETURN_ARG(QVariant, began_editing)));
         QVERIFY(began_editing.toBool());
         QVERIFY(clipboard->probes > 0);
         QVERIFY(!editor->property("canPaste").toBool());
-        const auto reopened_state = editing_state(editor);
+        auto disabled_state = editing_state(editor);
+        disabled_state[QStringLiteral("selectionStart")] = disabled_state.value(QStringLiteral("cursorPosition"));
+        disabled_state[QStringLiteral("selectionEnd")] = disabled_state.value(QStringLiteral("cursorPosition"));
         QVERIFY(titlebar->setProperty("title_editing_enabled", false));
         QVERIFY(!editor->isVisible());
-        QCOMPARE(editing_state(editor), reopened_state);
+        QCOMPARE(editing_state(editor), disabled_state);
         clipboard->probes = 0;
         QGuiApplication::clipboard()->dataChanged();
         QCOMPARE(clipboard->probes, 0);
