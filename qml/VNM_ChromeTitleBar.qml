@@ -474,6 +474,8 @@ Rectangle {
                 id: title_editor
                 objectName: "title_editor"
 
+                VNM_TextInputClipboardNotifications { target: title_editor }
+
                 property Item previous_focus_item: null
                 property string initial_text: ""
                 property bool finishing_edit: false

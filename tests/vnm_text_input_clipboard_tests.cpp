@@ -344,6 +344,115 @@ ApplicationWindow {
         QCOMPARE(clipboard->probes, active_probes);
     }
 
+    void title_editor_notifications_follow_its_edit_lifecycle()
+    {
+        Input_scene scene(false);
+        QVERIFY2(scene.m_root != nullptr, qPrintable(scene.m_error));
+        scene.m_root->setProperty("input_read_only", true);
+        QQmlComponent component(&scene.m_engine);
+        component.setData(R"(
+import QtQuick
+import QtQuick.Window
+import VNM_Chrome
+
+VNM_ChromeTitleBar {
+    width: 360
+    title: "Process title"
+    visible: Window.window && Window.window.visibility !== Window.FullScreen
+}
+)", QUrl(QStringLiteral("qrc:/tests/clipboard_title_editor.qml")));
+        std::unique_ptr<QObject> titlebar(component.create());
+        QVERIFY2(titlebar != nullptr, qPrintable(component.errorString()));
+        auto* const titlebar_item = qobject_cast<QQuickItem*>(titlebar.get());
+        QVERIFY(titlebar_item);
+        titlebar_item->setParentItem(qobject_cast<QQuickItem*>(scene.m_root.get()));
+        auto* const editor = titlebar->findChild<QQuickItem*>(QStringLiteral("title_editor"));
+        QVERIFY(editor);
+        scene.show();
+        QVERIFY(QTest::qWaitForWindowExposed(scene.m_window.get()));
+        const auto clipboard = observe_clipboard();
+        const auto hidden_state = editing_state(editor);
+        QVERIFY(!titlebar->property("title_editing_enabled").toBool());
+        QVERIFY(!editor->isVisible());
+        QVERIFY(!editor->property("readOnly").toBool());
+        QGuiApplication::clipboard()->dataChanged();
+        QCOMPARE(clipboard->probes, 0);
+        QVariant began_editing;
+        QVERIFY(QMetaObject::invokeMethod(
+            titlebar.get(), "begin_title_edit", Q_RETURN_ARG(QVariant, began_editing)));
+        QVERIFY(!began_editing.toBool());
+        QCOMPARE(editing_state(editor), hidden_state);
+
+        scene.m_window->showFullScreen();
+        QTRY_COMPARE(scene.m_window->visibility(), QWindow::FullScreen);
+        QVERIFY(!titlebar_item->isVisible());
+        QGuiApplication::clipboard()->dataChanged();
+        QCOMPARE(clipboard->probes, 0);
+        QCOMPARE(editing_state(editor), hidden_state);
+        scene.m_window->showNormal();
+        QTRY_VERIFY(titlebar_item->isVisible());
+        scene.m_window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(scene.m_window.get()));
+        scene.input()->forceActiveFocus();
+        QTRY_VERIFY(scene.input()->hasActiveFocus());
+
+        QVERIFY(titlebar->setProperty("title_editing_enabled", true));
+        clipboard->has_text = false;
+        QGuiApplication::clipboard()->dataChanged();
+        QCOMPARE(clipboard->probes, 0);
+        QVERIFY(QMetaObject::invokeMethod(
+            titlebar.get(), "begin_title_edit", Q_RETURN_ARG(QVariant, began_editing)));
+        QVERIFY(began_editing.toBool());
+        QVERIFY(clipboard->probes > 0);
+        QVERIFY(!editor->property("canPaste").toBool());
+        QTRY_VERIFY(editor->hasActiveFocus());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("Process title"));
+        QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("Process title"));
+        clipboard->has_text = true;
+        clipboard->probes = 0;
+        QGuiApplication::clipboard()->dataChanged();
+        QVERIFY(clipboard->probes > 0);
+        QVERIFY(editor->property("canPaste").toBool());
+
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, QStringLiteral("x"));
+        QCoreApplication::sendEvent(scene.m_window.get(), &key);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("x"));
+        QInputMethodEvent commit;
+        commit.setCommitString(QStringLiteral("\u03bb"));
+        QCoreApplication::sendEvent(editor, &commit);
+        QVERIFY(QMetaObject::invokeMethod(editor, "paste"));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("x\u03bbclipboard text"));
+        QVERIFY(editor->property("canUndo").toBool());
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 1), Q_ARG(int, 2)));
+        const auto draft_state = editing_state(editor);
+        QSignalSpy accepted(titlebar.get(), SIGNAL(title_edit_accepted(QString)));
+        QVERIFY(accepted.isValid());
+        QVERIFY(QMetaObject::invokeMethod(editor, "accepted"));
+        QCOMPARE(accepted.count(), 1);
+        QCOMPARE(accepted.first().first().toString(), QStringLiteral("x\u03bbclipboard text"));
+        QVERIFY(!editor->isVisible());
+        QCOMPARE(editing_state(editor), draft_state);
+        QTRY_VERIFY(scene.input()->hasActiveFocus());
+        clipboard->has_text = false;
+        clipboard->probes = 0;
+        QGuiApplication::clipboard()->dataChanged();
+        QCOMPARE(clipboard->probes, 0);
+        QCOMPARE(editing_state(editor), draft_state);
+
+        QVERIFY(QMetaObject::invokeMethod(
+            titlebar.get(), "begin_title_edit", Q_RETURN_ARG(QVariant, began_editing)));
+        QVERIFY(began_editing.toBool());
+        QVERIFY(clipboard->probes > 0);
+        QVERIFY(!editor->property("canPaste").toBool());
+        const auto reopened_state = editing_state(editor);
+        QVERIFY(titlebar->setProperty("title_editing_enabled", false));
+        QVERIFY(!editor->isVisible());
+        QCOMPARE(editing_state(editor), reopened_state);
+        clipboard->probes = 0;
+        QGuiApplication::clipboard()->dataChanged();
+        QCOMPARE(clipboard->probes, 0);
+    }
+
     void editing_and_bindings_survive_suspension()
     {
         QFETCH(QString, input_type);
